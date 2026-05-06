@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>首頁/朋友</title>
+    <style>
+        :root {
+            --nav-bg: #4A4A4A;   
+            --content-bg: #B3B3B3; 
+            --card-bg: #FFFFFF;  
+            --text-dark: #333333;
+            --text-gray: #7A7A7A;
+            --hover-bg: #E0E0E0; 
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--content-bg);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .app-container { width: 100%; display: flex; flex-direction: column; }
+
+        .navbar {
+            height: 60px; flex-shrink: 0; background-color: var(--nav-bg); display: flex; align-items: center; justify-content: space-between; padding: 0 40px; position: sticky; top: 0; z-index: 100;
+        }
+        .nav-logo { width: 40px; height: 40px; background-color: #000; border-radius: 50%; cursor: pointer; transition: transform 0.2s; }
+        .nav-logo:hover { transform: scale(1.05); }
+        .nav-actions { display: flex; gap: 15px; align-items: center; }
+        .logout-btn { background-color: var(--text-gray); color: white; border: none; padding: 8px 15px; border-radius: 5px; cursor: pointer; transition: 0.2s; }
+        .logout-btn:hover { background-color: #555555; }
+        .nav-icon { width: 40px; height: 40px; background-color: var(--card-bg); border-radius: 50%; cursor: pointer; }
+        .nav-square { width: 40px; height: 40px; background-color: var(--content-bg); cursor: pointer; transition: transform 0.2s; }
+        .nav-square:hover { transform: scale(1.05); }
+        .nav-badge { background-color: var(--card-bg); padding: 5px 10px; border-radius: 5px; font-weight: bold; font-size: 14px; cursor: pointer; transition: transform 0.2s; }
+        .nav-badge:hover { transform: scale(1.05); }
+
+        .main-layout { display: flex; width: 100%; margin: 0; padding: 0; gap: 0; min-height: calc(100vh - 60px); }
+
+        .sidebar {
+            width: 380px; display: flex; flex-direction: column; gap: 30px; flex-shrink: 0; position: sticky; top: 60px; align-self: flex-start; background-color: #E8E8E8; padding: 40px; box-sizing: border-box; height: calc(100vh - 60px); overflow-y: auto; border-right: 1px solid #D0D0D0;
+        }
+
+        .grid-icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; }
+        .grid-icon-circle { 
+            width: 100%; aspect-ratio: 1 / 1; height: auto; background-color: var(--card-bg); border-radius: 50%; cursor: pointer; transition: all 0.3s ease; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin: 0;
+        }
+        .grid-icon-circle:hover { transform: scale(1.05); box-shadow: 0 6px 15px rgba(0,0,0,0.1); }
+        .sidebar-card { background-color: var(--card-bg); height: 120px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); transition: transform 0.3s ease; cursor: pointer; }
+        .sidebar-card:hover { transform: translateY(-5px); box-shadow: 0 8px 20px rgba(0,0,0,0.1); }
+
+        .feed-content { flex: 1; display: flex; flex-direction: column; gap: 40px; padding: 40px 10%; padding-bottom: 80px; background-color: #F0F2F5; box-sizing: border-box; max-width: 1200px; margin: 0 auto; }
+
+        .post-card { display: flex; gap: 25px; align-items: flex-start; opacity: 0; transform: translateY(50px); transition: opacity 0.6s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.6s cubic-bezier(0.2, 0.8, 0.2, 1); }
+        .post-card.show { opacity: 1; transform: translateY(0); }
+        .post-avatar { width: 90px; height: 90px; background-color: var(--card-bg); border-radius: 50%; flex-shrink: 0; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.08); transition: transform 0.3s ease; }
+        .post-avatar:hover { transform: scale(1.05); }
+        .post-body { background-color: var(--card-bg); width: 100%; border-radius: 16px; padding: 30px; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.05); transition: box-shadow 0.3s ease; }
+        .post-body:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+        
+        @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 0.3; } 100% { opacity: 0.6; } }
+        .skeleton-line { background-color: var(--text-gray); height: 20px; margin-bottom: 15px; border-radius: 10px; animation: pulse 2s infinite ease-in-out; }
+        .skeleton-line.short { width: 40%; }
+        .skeleton-line.long { width: 100%; }
+        
+        .post-action-btn { position: absolute; right: 25px; bottom: 25px; background-color: var(--text-gray); color: white; border: none; padding: 10px 30px; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; font-size: 16px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .post-action-btn:hover { background-color: #555555; transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0,0,0,0.15); }
+        
+        .post-action-btn-large { flex: 1; background-color: var(--text-gray); color: white; border: none; padding: 15px; font-size: 16px; font-weight: bold; cursor: pointer; border-radius: 8px; text-align: center; transition: all 0.3s ease; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .post-action-btn-large:hover { background-color: #555555; transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0,0,0,0.15); }
+
+        .fab { position: fixed; bottom: 40px; right: 40px; width: 80px; height: 80px; background-color: #000; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: white; font-size: 50px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: transform 0.2s; z-index: 100; }
+        .fab:hover { transform: scale(1.05); background-color: #333; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="navbar">
+            <div class="nav-logo" onclick="window.location.href='first_page.html'"></div>
+            <div class="nav-actions">
+                <div class="nav-square" onclick="window.location.href='explore_page.html'"></div>
+                <div class="nav-icon" onclick="window.location.href='personal_page.html'"></div>
+                <div class="nav-badge" onclick="window.location.href='freq_page.html'">999+</div>
+            </div>
+        </div>
+
+        <div class="main-layout">
+            <div class="sidebar">
+                <div class="grid-icons">
+                    <!-- 點擊圓點導向 chat.html -->
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                    <div class="grid-icon-circle" onclick="window.location.href='chat.html'"></div>
+                </div>
+                <div class="sidebar-card"></div>
+                <div class="sidebar-card"></div>
+            </div>
+
+            <div class="feed-content">
+                <div class="post-card">
+                    <div class="post-avatar" onclick="window.location.href='personal_page.html'"></div>
+                    <div class="post-body">
+                        <div class="skeleton-line short"></div>
+                        <div style="display: flex; gap: 10px; margin-bottom: 20px; margin-top: 20px;">
+                            <div class="skeleton-line" style="width: 40px; margin-bottom: 0;"></div>
+                            <div class="skeleton-line" style="width: 40px; margin-bottom: 0;"></div>
+                        </div>
+                        <button class="post-action-btn">分享</button>
+                    </div>
+                </div>
+                <div class="post-card">
+                    <div class="post-avatar" onclick="window.location.href='personal_page.html'"></div>
+                    <div style="display: flex; flex-direction: column; width: 100%;">
+                        <div class="post-body">
+                            <div class="skeleton-line short"></div>
+                            <div class="skeleton-line long"></div>
+                            <div class="skeleton-line long"></div>
+                        </div>
+                        <div style="display: flex; gap: 10px; margin-top: 15px; padding-left: 5px;">
+                            <div style="width: 25px; height: 25px; background-color: #CCCCCC; border-radius: 4px;"></div>
+                            <div style="width: 25px; height: 25px; background-color: #CCCCCC; border-radius: 4px;"></div>
+                            <div style="width: 25px; height: 25px; background-color: #CCCCCC; border-radius: 4px;"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="post-card">
+                    <div class="post-avatar" onclick="window.location.href='personal_page.html'"></div>
+                    <div class="post-body">
+                        <div style="width: 100%; height: 350px; background-color: var(--hover-bg); border-radius: 8px;"></div>
+                    </div>
+                </div>
+            </div> 
+        </div> 
+        <div class="fab">+</div>
+    </div> 
+
+    <!-- Script to duplicate blocks and add scroll animations -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const feed = document.querySelector('.feed-content');
+            const originalCards = feed.innerHTML;
+            
+            // Duplicate the cards 3 times to make "more blocks"
+            for (let i = 0; i < 3; i++) {
+                feed.innerHTML += originalCards;
+            }
+
+            // Setup Intersection Observer for slide-up animation
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('show');
+                    } else {
+                        // Remove class if you want the animation to happen every time you scroll
+                        entry.target.classList.remove('show');
+                    }
+                });
+            }, {
+                root: null,
+                rootMargin: '0px',
+                threshold: 0.15
+            });
+
+            document.querySelectorAll('.post-card').forEach(card => {
+                observer.observe(card);
+            });
+        });
+    </script>
+</body>
+</html>

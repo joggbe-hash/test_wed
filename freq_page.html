@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>通知/好友請求</title>
+    <style>
+        :root {
+            --nav-bg: #4A4A4A;   
+            --content-bg: #B3B3B3; 
+            --card-bg: #FFFFFF;  
+            --text-dark: #333333;
+            --text-gray: #7A7A7A;
+            --hover-bg: #E0E0E0; 
+        }
+
+        body { margin: 0; padding: 0; background-color: var(--content-bg); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .app-container { width: 100%; display: flex; flex-direction: column; }
+
+        .navbar { height: 60px; flex-shrink: 0; background-color: var(--nav-bg); display: flex; align-items: center; justify-content: space-between; padding: 0 40px; position: sticky; top: 0; z-index: 100; }
+        .nav-logo { width: 40px; height: 40px; background-color: #000; border-radius: 50%; cursor: pointer; transition: transform 0.2s; }
+        .nav-logo:hover { transform: scale(1.05); }
+        .nav-actions { display: flex; gap: 15px; align-items: center; }
+        .nav-icon { width: 40px; height: 40px; background-color: var(--card-bg); border-radius: 50%; cursor: pointer; transition: transform 0.2s; }
+        .nav-icon:hover { transform: scale(1.05); }
+        .nav-square { width: 40px; height: 40px; background-color: var(--content-bg); cursor: pointer; transition: transform 0.2s; }
+        .nav-square:hover { transform: scale(1.05); }
+        .nav-badge { background-color: var(--card-bg); padding: 5px 10px; border-radius: 5px; font-weight: bold; font-size: 14px; cursor: pointer; transition: transform 0.2s; }
+        .nav-badge:hover { transform: scale(1.05); }
+
+        .main-layout { display: flex; width: 100%; margin: 0; padding: 0; gap: 0; min-height: calc(100vh - 60px); }
+
+        .sidebar { width: 380px; display: flex; flex-direction: column; gap: 30px; flex-shrink: 0; position: sticky; top: 60px; align-self: flex-start; background-color: #8C8C8C; padding: 40px; box-sizing: border-box; height: calc(100vh - 60px); overflow-y: auto; border-right: 1px solid #777777; }
+        
+        .freq-sidebar-card { width: 100%; height: 180px; background-color: var(--card-bg); border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); flex-shrink: 0; }
+
+        .feed-content { flex: 1; display: flex; flex-direction: column; gap: 30px; padding: 40px 10%; padding-bottom: 80px; background-color: #A0A0A0; box-sizing: border-box; max-width: 1400px; margin: 0 auto; align-items: stretch; }
+
+        .freq-list-item { width: 100%; height: 70px; background-color: #D9D9D9; border-radius: 4px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); flex-shrink: 0; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="navbar">
+            <div class="nav-logo" onclick="window.location.href='first_page.html'"></div>
+            <div class="nav-actions">
+                <div class="nav-square" onclick="window.location.href='explore_page.html'"></div>
+                <div class="nav-icon" onclick="window.location.href='personal_page.html'"></div>
+                <div class="nav-badge" onclick="window.location.href='freq_page.html'">999+</div>
+            </div>
+        </div>
+
+        <div class="main-layout">
+            <div class="sidebar">
+                <!-- Generate 3 sidebar cards -->
+                <script>
+                    for(let i=0; i<3; i++) {
+                        document.write('<div class="freq-sidebar-card"></div>');
+                    }
+                </script>
+            </div>
+
+            <div class="feed-content">
+                <!-- Generate 6 list items -->
+                <script>
+                    for(let i=0; i<6; i++) {
+                        document.write('<div class="freq-list-item"></div>');
+                    }
+                </script>
+            </div> 
+        </div> 
+    </div> 
+</body>
+</html>
