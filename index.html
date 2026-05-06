@@ -102,6 +102,17 @@
         .login-actions { display: flex; gap: 20px; width: 100%; max-width: 500px; justify-content: space-between; }
         .login-actions .btn { flex: 1; }
         .register-submit-btn { margin-top: 20px; width: 100%; max-width: 300px; }
+        @media (max-width: 768px) {
+            .form-section { padding: 20px; width: 100vw; }
+            .login-image-placeholder { height: 180px; }
+            .input-label { min-width: 80px; padding: 10px; font-size: 14px; }
+            .input-field { font-size: 14px; }
+            .btn { width: 100%; padding: 10px; }
+            .login-actions { flex-direction: column; gap: 10px; }
+            .forgot-password { text-align: center; }
+            .shape-circle { width: 40px; height: 40px; left: 50px; top: 30px; }
+            .shape-triangle { border-left: 50px solid transparent; border-right: 50px solid transparent; border-bottom: 90px solid #E0E0E0; left: 100px; bottom: 20px; }
+        }
     </style>
 </head>
 <body>

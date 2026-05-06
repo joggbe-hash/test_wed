@@ -66,6 +66,24 @@
         @media (max-width: 1200px) {
             .feed-content { grid-template-columns: repeat(2, 1fr); }
         }
+        @media (max-width: 768px) {
+            .navbar { padding: 0 15px; }
+            .nav-actions { gap: 10px; }
+            .nav-logo, .nav-icon, .nav-square { width: 32px; height: 32px; }
+            .nav-badge { font-size: 12px; padding: 3px 6px; }
+            
+            .main-layout { flex-direction: column; }
+            .sidebar { 
+                width: 100%; height: auto; position: static; padding: 20px; 
+                border-right: none; border-bottom: 1px solid #D0D0D0; gap: 15px;
+            }
+            .grid-icons { grid-template-columns: repeat(8, 1fr); gap: 10px; }
+            
+            .feed-content { padding: 20px; width: 100%; gap: 20px; }
+            .explore-card { min-width: 240px; max-width: 240px; }
+            .horizontal-scroller { gap: 10px; }
+            .fab { width: 60px; height: 60px; bottom: 20px; right: 20px; font-size: 35px; }
+        }
     </style>
 </head>
 <body>
