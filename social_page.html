@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
@@ -66,7 +66,11 @@
         .post-action-btn { position: absolute; right: 25px; bottom: 25px; background-color: var(--text-gray); color: white; border: none; padding: 10px 30px; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; font-size: 16px; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
         .post-action-btn:hover { background-color: #555555; transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0,0,0,0.15); }
         
-        .fab { position: fixed; bottom: 40px; right: 40px; width: 80px; height: 80px; background-color: #000; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: white; font-size: 50px; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: transform 0.2s; z-index: 100; }
+        .theme-banner { width: 100%; background-color: #061424; border-radius: 12px; padding: 30px; box-sizing: border-box; color: #FFFFFF; position: relative; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 10px; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; height: 250px; }
+        .theme-banner-header { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+        .theme-banner-bottom { display: flex; flex-direction: column; gap: 15px; width: 70%; }
+        
+        .fab { position: fixed; bottom: 40px; right: 40px; width: 80px; height: 80px; background-color: #000; background-image: linear-gradient(white, white), linear-gradient(white, white); background-position: center; background-repeat: no-repeat; background-size: 40% 4px, 4px 40%; border-radius: 50%; color: transparent; font-size: 0; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: all 0.2s; z-index: 100; }
         .fab:hover { transform: scale(1.05); background-color: #333; }
         @media (max-width: 768px) {
             .navbar { padding: 0 15px; }
@@ -87,6 +91,8 @@
             .post-avatar { width: 50px; height: 50px; }
             .post-body { padding: 15px; }
             .fab { width: 60px; height: 60px; bottom: 20px; right: 20px; font-size: 35px; }
+            .theme-banner { height: auto; gap: 40px; }
+            .theme-banner-bottom { width: 100%; }
         }
     </style>
 </head>
@@ -107,16 +113,35 @@
                 <div class="sidebar-card"></div>
                 <div class="sidebar-card"></div>
                 <div class="grid-icons">
-                    <!-- 點擊圓點導向 chat.html -->
+                    <!-- 點擊圓點導向 introduce_page.html -->
                     <script>
                         for(let i=0; i<16; i++) {
-                            document.write('<div class="grid-icon-circle" onclick="window.location.href=\'chat.html\'"></div>');
+                            document.write('<div class="grid-icon-circle" onclick="window.location.href=\'introduce_page.html\'"></div>');
                         }
                     </script>
                 </div>
             </div>
 
             <div class="feed-content">
+                <div class="theme-banner">
+                    <div class="theme-banner-header">
+                        <div style="display: flex; gap: 15px;">
+                            <div style="width: 80px; height: 20px; background-color: rgba(255,255,255,0.2); border-radius: 4px;"></div>
+                            <div style="width: 120px; height: 20px; background-color: rgba(255,255,255,0.2); border-radius: 4px;"></div>
+                        </div>
+                        <div style="display: flex; gap: 15px;">
+                            <div style="width: 80px; height: 35px; background-color: #FFFFFF; border-radius: 20px;"></div>
+                            <div style="width: 30px; height: 35px; background-color: rgba(255,255,255,0.2); border-radius: 4px;"></div>
+                        </div>
+                    </div>
+                    <div class="theme-banner-bottom">
+                        <div style="height: 35px; width: 40%; background-color: rgba(255,255,255,0.8); border-radius: 8px;"></div>
+                        <div style="height: 15px; width: 100%; background-color: rgba(255,255,255,0.4); border-radius: 4px;"></div>
+                        <div style="height: 15px; width: 60%; background-color: rgba(255,255,255,0.4); border-radius: 4px;"></div>
+                    </div>
+                    <div style="position: absolute; bottom: 0; right: 50px; width: 100px; height: 100px; background-color: rgba(255,255,255,0.2); border-radius: 50% 50% 0 0;"></div>
+                </div>
+
                 <div class="post-card">
                     <div class="post-avatar" onclick="window.location.href='personal_page.html'"></div>
                     <div class="post-body">
@@ -158,11 +183,15 @@
     <script>
         document.addEventListener('DOMContentLoaded', () => {
             const feed = document.querySelector('.feed-content');
-            const originalCards = feed.innerHTML;
+            
+            // Extract only the post-cards to duplicate, so we don't duplicate the theme banner
+            const postCardsHTML = Array.from(feed.querySelectorAll('.post-card'))
+                                       .map(card => card.outerHTML)
+                                       .join('');
             
             // Duplicate the cards 3 times to make "more blocks"
             for (let i = 0; i < 3; i++) {
-                feed.innerHTML += originalCards;
+                feed.insertAdjacentHTML('beforeend', postCardsHTML);
             }
 
             // Setup Intersection Observer for slide-up animation

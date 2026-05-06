@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>個人介紹</title>
+    <style>
+        body {
+            margin: 0; padding: 0; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            height: 100vh; overflow: hidden; 
+            display: flex; justify-content: center; align-items: center;
+        }
+
+        /* 模擬模態視窗的深色半透明背景，可點擊 */
+        .modal-backdrop {
+            position: absolute; 
+            top: 0; left: 0; 
+            width: 100%; height: 100%; 
+            background-color: rgba(10, 15, 25, 0.6); 
+            backdrop-filter: blur(4px); 
+            -webkit-backdrop-filter: blur(4px);
+            z-index: 1; 
+            cursor: pointer;
+        }
+
+        /* 個人介紹卡片 */
+        .profile-card {
+            position: relative;
+            z-index: 10;
+            width: 320px;
+            background-color: #A29BCE; /* 薰衣草紫 */
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            animation: modalPop 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+        }
+
+        @keyframes modalPop {
+            0% { transform: scale(0.95); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .profile-cover {
+            width: 100%;
+            height: 130px;
+            background-color: #D2B48C; 
+            /* 模擬一點背景圖的質感 */
+            background-image: linear-gradient(45deg, #c28e6b, #d9a07b);
+        }
+
+        .profile-avatar-container {
+            display: flex;
+            justify-content: center;
+            margin-top: -45px;
+        }
+
+        .profile-avatar {
+            width: 90px;
+            height: 90px;
+            border-radius: 50%;
+            border: 4px solid #A29BCE;
+            background-color: #E8D354; /* 金黃色大頭貼 */
+            /* 用簡易svg模擬臉 */
+            background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="40" r="15" fill="%23000"/><circle cx="50" cy="90" r="40" fill="%23000"/></svg>');
+            background-size: cover;
+            background-position: center;
+        }
+
+        .profile-info {
+            text-align: center;
+            padding: 5px 20px 20px;
+            color: #2b5c73; /* 深藍綠色文字 */
+        }
+
+        .profile-username {
+            font-size: 16px;
+            font-weight: 600;
+            margin: 10px 0 5px 0;
+        }
+
+        .profile-link {
+            font-size: 13px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+            margin-bottom: 25px;
+        }
+
+        .profile-actions {
+            display: flex;
+            justify-content: center;
+            gap: 12px;
+            margin-bottom: 25px;
+        }
+
+        .action-btn {
+            width: 42px;
+            height: 42px;
+            border-radius: 50%;
+            border: 2px solid #8B83BB; /* 稍微深一點的紫 */
+            background: transparent;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        
+        .action-btn:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+            transform: scale(1.05);
+        }
+
+        /* SVG 圖示 */
+        .icon {
+            width: 20px;
+            height: 20px;
+            fill: #2b5c73;
+        }
+
+        .expand-arrow {
+            display: flex;
+            justify-content: center;
+            padding-bottom: 15px;
+            cursor: pointer;
+        }
+        .expand-arrow svg {
+            width: 24px;
+            height: 24px;
+            fill: #000;
+            transition: transform 0.2s;
+        }
+        .expand-arrow:hover svg {
+            transform: translateY(3px);
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 載入上一頁作為背景，完美模擬出沒有跳轉頁面的透明模態視窗錯覺 -->
+    <iframe id="bg-iframe" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 0; border: none; pointer-events: none;"></iframe>
+    <script>
+        const referrer = document.referrer;
+        if (referrer && referrer !== window.location.href) {
+            document.getElementById('bg-iframe').src = referrer;
+        } else {
+            document.getElementById('bg-iframe').src = 'first_page.html';
+        }
+    </script>
+
+    <!-- 點擊背景空白處返回上一頁 -->
+    <div class="modal-backdrop" onclick="history.back()"></div>
+
+    <!-- 個人介紹卡片 -->
+    <div class="profile-card">
+        <div class="profile-cover"></div>
+        
+        <div class="profile-avatar-container">
+            <div class="profile-avatar"></div>
+        </div>
+
+        <div class="profile-info">
+            <div class="profile-username">@哈哈</div>
+            <div class="profile-link">
+                <!-- 地球圖示 -->
+                <svg viewBox="0 0 24 24" style="width:14px; height:14px; fill:currentColor;"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+               haha.tww.com
+            </div>
+
+            <div class="profile-actions">
+                <!-- 信封圖示 -->
+                <button class="action-btn">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M20 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 4l-8 5-8-5V6l8 5 8-5v2z"/></svg>
+                </button>
+                <!-- 加好友圖示 -->
+                <button class="action-btn">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                </button>
+                <!-- 更多圖示 -->
+                <button class="action-btn">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M6 10c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm12 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2zm-6 0c-1.1 0-2 .9-2 2s.9 2 2 2 2-.9 2-2-.9-2-2-2z"/></svg>
+                </button>
+            </div>
+            
+            <div class="expand-arrow" onclick="history.back()">
+                <!-- 向下箭頭 -->
+                <svg viewBox="0 0 24 24"><path d="M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z"/></svg>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
