@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>探索</title>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=explore" />
+    <style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        :root {
+            --nav-bg: #8B6E5B;   
+            --content-bg: #E0D8CC; 
+            --card-bg: #FFFFFF;  
+            --text-dark: #333333;
+            --text-gray: #7A7A7A;
+            --hover-bg: #E0E0E0; 
+            --feed-bg: #F4EFEA;
+        }
+
+        body { margin: 0; padding: 0; background-color: var(--content-bg); font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .app-container { width: 100%; display: flex; flex-direction: column; }
+
+        .navbar { height: 60px; flex-shrink: 0; background-color: var(--nav-bg); display: flex; align-items: center; justify-content: space-between; padding: 0 40px; position: sticky; top: 0; z-index: 100; }
+        .nav-logo { width: 40px; height: 40px; background-color: #000; border-radius: 50%; cursor: pointer; transition: transform 0.2s; }
+        .nav-logo:hover { transform: scale(1.05); }
+        .nav-actions { display: flex; gap: 15px; align-items: center; }
+        .nav-icon { width: 40px; height: 40px; background-color: var(--card-bg); border-radius: 50%; cursor: pointer; transition: transform 0.2s; }
+        .nav-icon:hover { transform: scale(1.05); }
+        .nav-square { width: 40px; height: 40px; background-color: #4A3320; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: white; cursor: pointer; transition: transform 0.2s; }
+        .nav-square:hover { transform: scale(1.05); }
+        .nav-badge { background-color: var(--card-bg); padding: 5px 10px; border-radius: 5px; font-weight: bold; font-size: 14px; cursor: pointer; transition: transform 0.2s; }
+        .nav-badge:hover { transform: scale(1.05); }
+
+        .main-layout { display: flex; width: 100%; margin: 0; padding: 0; gap: 0; min-height: calc(100vh - 60px); }
+
+        .sidebar { width: 380px; display: flex; flex-direction: column; gap: 30px; flex-shrink: 0; position: sticky; top: 60px; align-self: flex-start; background-color: var(--content-bg); padding: 40px; box-sizing: border-box; height: calc(100vh - 60px); overflow-y: auto; border-right: none; }
+        .fab { position: fixed; bottom: 40px; right: 40px; width: 80px; height: 80px; background-color: #000; background-image: linear-gradient(white, white), linear-gradient(white, white); background-position: center; background-repeat: no-repeat; background-size: 40% 4px, 4px 40%; border-radius: 50%; color: transparent; font-size: 0; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.3); transition: all 0.2s; z-index: 100; }
+        .fab:hover { transform: scale(1.05); background-color: #333; }
+        
+        .sidebar-search { width: 100%; height: 45px; background-color: #FFFFFF; border-radius: 2px; display: flex; align-items: center; padding: 0 15px; box-sizing: border-box; box-shadow: 0 2px 8px rgba(0,0,0,0.05); margin-bottom: 10px; }
+        .sidebar-search-input { flex: 1; border: none; outline: none; background: transparent; padding: 0 10px; font-size: 16px; color: var(--text-dark); }
+        .sidebar-search-input::placeholder { color: #A0A0A0; }
+
+        .grid-icons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px 15px; }
+        .grid-item { display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; transition: transform 0.2s; }
+        .grid-item:hover { transform: scale(1.05); }
+        .grid-icon-circle { width: 100%; aspect-ratio: 1 / 1; background-color: var(--card-bg); border-radius: 50%; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+
+        .feed-content { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: 40px; padding-bottom: 80px; background-color: var(--feed-bg); box-sizing: border-box; max-width: 1400px; margin: 0 auto; align-items: stretch; overflow-x: hidden; }
+
+        .horizontal-scroller { display: flex; gap: 20px; overflow-x: auto; padding-bottom: 20px; cursor: grab; -ms-overflow-style: none; scrollbar-width: none; }
+        .horizontal-scroller:active { cursor: grabbing; }
+        .horizontal-scroller::-webkit-scrollbar { display: none; }
+
+        .explore-card { min-width: 300px; max-width: 300px; flex-shrink: 0; background-color: var(--card-bg); border-radius: 8px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); display: flex; flex-direction: column; transition: transform 0.3s ease, box-shadow 0.3s ease; user-select: none; }
+        .explore-card:hover { transform: translateY(-5px); box-shadow: 0 8px 25px rgba(0,0,0,0.1); }
+        
+        .explore-header { height: 120px; background-color: #DCDCDC; padding: 15px; display: flex; align-items: flex-end; gap: 15px; }
+        .explore-avatar { width: 45px; height: 45px; background-color: white; border-radius: 50%; flex-shrink: 0; cursor: pointer; }
+        .explore-title-area { display: flex; flex-direction: column; justify-content: center; gap: 5px; margin-bottom: 5px; }
+        .explore-title { font-size: 16px; color: #333; }
+        .explore-tags { font-size: 12px; color: #666; }
+        
+        .explore-details { padding: 20px; display: flex; flex-direction: column; flex: 1; background-color: white; }
+        .explore-desc { font-size: 14px; color: #333; line-height: 1.5; margin-bottom: 20px; }
+        .explore-members { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #666; margin-bottom: 20px; }
+        
+        .post-action-btn-large { flex: 1; background-color: #4A3320; color: white; border: none; padding: 12px; font-size: 16px; font-weight: normal; letter-spacing: 2px; cursor: pointer; border-radius: 4px; text-align: center; transition: all 0.3s ease; }
+        .post-action-btn-large:hover { background-color: #331A00; }
+
+        @media (max-width: 1200px) {
+            .feed-content { grid-template-columns: repeat(2, 1fr); }
+        }
+        @media (max-width: 768px) {
+            .navbar { padding: 0 15px; }
+            .nav-actions { gap: 10px; }
+            .nav-logo, .nav-icon, .nav-square { width: 32px; height: 32px; }
+            .nav-badge { font-size: 12px; padding: 3px 6px; }
+            
+            .main-layout { flex-direction: column; }
+            .sidebar { 
+                width: 100%; height: auto; position: static; padding: 20px; 
+                border-right: none; border-bottom: 1px solid #D0D0D0; gap: 15px;
+            }
+            .grid-icons { grid-template-columns: repeat(8, 1fr); gap: 10px; }
+            
+            .feed-content { padding: 20px; width: 100%; gap: 20px; }
+            .explore-card { min-width: 240px; max-width: 240px; }
+            .horizontal-scroller { gap: 10px; }
+            .fab { width: 60px; height: 60px; bottom: 20px; right: 20px; font-size: 35px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div class="navbar">
+            <div class="nav-logo" onclick="window.location.href='first_page.html'"></div>
+            <div class="nav-actions">
+                <div class="nav-square" onclick="window.location.href='explore_page.html'">
+                    <span class="material-symbols-outlined">explore</span>
+                </div>
+                <div class="nav-icon" onclick="window.location.href='personal_page.html'"></div>
+                <div class="nav-badge" onclick="window.location.href='freq_page.html'">999+</div>
+            </div>
+        </div>
+
+        <div class="main-layout">
+            <div class="sidebar">
+                <div class="sidebar-search">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7A7A7A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 10px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" class="sidebar-search-input" placeholder="">
+                </div>
+                <div class="grid-icons">
+                    <script>
+                        for(let i=0; i<20; i++) {
+                            document.write(`
+                                <div class="grid-item">
+                                    <div class="grid-icon-circle"></div>
+                                    <div style="font-size: 14px; color: #333; margin-top: 5px;">類別</div>
+                                </div>
+                            `);
+                        }
+                    </script>
+                </div>
+            </div>
+
+            <div class="feed-content">
+                <script>
+                    for(let r=0; r<3; r++) {
+                        document.write(`
+                            <div class="horizontal-scroller" style="margin-top: ${r===0 ? '0' : '20px'};">
+                        `);
+                        
+                        for(let i=0; i<20; i++) {
+                            document.write(`
+                                <div class="explore-card">
+                                    <div class="explore-header">
+                                        <div class="explore-avatar" onclick="window.location.href='personal_page.html'"></div>
+                                        <div class="explore-title-area">
+                                            <div class="explore-title">社群名稱</div>
+                                            <div class="explore-tags">#社群標籤 #社群標籤 #社群標籤</div>
+                                        </div>
+                                    </div>
+                                    <div class="explore-details">
+                                        <div class="explore-desc">社群簡介社群簡介社群簡介社群簡介社群簡介社群簡介社群簡介</div>
+                                        <div class="explore-members">
+                                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+                                            <span>555名成員</span>
+                                        </div>
+                                        <button class="post-action-btn-large" onclick="window.location.href='social_page.html'">探索</button>
+                                    </div>
+                                </div>
+                            `);
+                        }
+                        
+                        document.write(`
+                            </div>
+                        `);
+                    }
+                </script>
+                
+                <!-- JS for Mouse Drag and Wheel to Scroll -->
+                <script>
+                    const sliders = document.querySelectorAll('.horizontal-scroller');
+                    sliders.forEach(slider => {
+                        let isDown = false;
+                        let startX;
+                        let scrollLeft;
+
+                        slider.addEventListener('mousedown', (e) => {
+                            isDown = true;
+                            slider.style.cursor = 'grabbing';
+                            startX = e.pageX - slider.offsetLeft;
+                            scrollLeft = slider.scrollLeft;
+                            // Prevent native drag/text selection
+                            e.preventDefault();
+                        });
+
+                        window.addEventListener('mouseup', () => {
+                            if(isDown) {
+                                isDown = false;
+                                slider.style.cursor = 'grab';
+                            }
+                        });
+
+                        window.addEventListener('mousemove', (e) => {
+                            if (!isDown) return;
+                            e.preventDefault();
+                            const x = e.pageX - slider.offsetLeft;
+                            const walk = (x - startX) * 1; // 1:1 movement like mobile
+                            slider.scrollLeft = scrollLeft - walk;
+                        });
+
+                        // Mouse Wheel to Scroll Horizontally
+                        slider.addEventListener('wheel', (e) => {
+                            e.preventDefault();
+                            slider.scrollLeft += e.deltaY;
+                        }, { passive: false });
+                    });
+                </script>
+            </div> 
+        </div> 
+    </div> 
+</body>
+</html>
