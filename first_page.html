@@ -1,10 +1,12 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>首頁/朋友</title>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200&icon_names=explore" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fontsource-variable/intel-one-mono/index.css">
+
     <style>
         .material-symbols-outlined {
             font-variation-settings:
@@ -27,7 +29,8 @@
             margin: 0;
             padding: 0;
             background-color: var(--content-bg);
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Intel One Mono', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-weight: 400;
         }
 
         .app-container { width: 100%; display: flex; flex-direction: column; }
@@ -66,7 +69,7 @@
         .post-card.show { opacity: 1; transform: translateY(0); }
         .post-avatar { width: 90px; height: 90px; background-color: var(--card-bg); border-radius: 50%; flex-shrink: 0; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.08); transition: transform 0.3s ease; }
         .post-avatar:hover { transform: scale(1.05); }
-        .post-body { background-color: var(--card-bg); width: 100%; border-radius: 16px; padding: 30px; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.05); transition: box-shadow 0.3s ease; }
+        .post-body { background-color: var(--card-bg); width: 100%; min-width: 0; flex: 1; border-radius: 4px; padding: 30px; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1.5px solid #D8CFC4; transition: box-shadow 0.3s ease; }
         .post-body:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
         
         @keyframes pulse { 0% { opacity: 0.6; } 50% { opacity: 0.3; } 100% { opacity: 0.6; } }
@@ -148,7 +151,7 @@
                 <div class="post-card show" style="opacity: 1; transform: translateY(0);">
                     <div class="post-avatar" onclick="window.location.href='personal_page.html'"></div>
                     <div class="post-body">
-                        <div style="font-size: 20px; font-family: monospace; margin-bottom: 15px; color: #4A4A4A;">@yourid</div>
+                        <div style="font-size: 20px; font-family: 'Intel One Mono', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-weight: 500; margin-bottom: 15px; color: #4A4A4A;">@yourid</div>
                         <div style="font-size: 18px; color: #333; margin-bottom: 30px;">(打字框)</div>
                         <div style="display: flex; justify-content: space-between; align-items: center;">
                             <div style="display: flex; gap: 15px; color: #7A7A7A;">
@@ -168,18 +171,20 @@
                 <!-- Post 2: Text Post -->
                 <div class="post-card show" style="opacity: 1; transform: translateY(0);">
                     <div class="post-avatar" onclick="window.location.href='personal_page.html'"></div>
-                    <div class="post-body">
-                        <div style="font-size: 16px; color: #333; line-height: 1.6; margin-bottom: 20px;">
-                            個人內容
+                    <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+                        <div class="post-body">
+                            <div style="font-size: 16px; color: #333; line-height: 1.6;">個人內容</div>
                         </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #EEEEEE; padding-top: 15px; color: #7A7A7A;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 6px; color: #7A7A7A;">
                             <div style="display: flex; gap: 15px;">
                                 <div onclick="toggleEye(this)" style="cursor: pointer; display: flex; align-items: center;">
-                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 10 C8 16, 16 16, 21 10"/><line x1="12" y1="14" x2="12" y2="18"/><line x1="8" y1="13" x2="6" y2="16"/><line x1="16" y1="13" x2="18" y2="16"/><line x1="10" y1="13.5" x2="9" y2="17"/><line x1="14" y1="13.5" x2="15" y2="17"/></svg>
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
                                 </div>
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
                             </div>
                             <div style="display: flex; gap: 15px;">
+                                <svg onclick="toggleHeart(this)" style="cursor: pointer;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
                                 <svg onclick="toggleBookmark(this)" style="cursor: pointer;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
                             </div>
@@ -190,11 +195,11 @@
                 <!-- Post 3: Text Post -->
                 <div class="post-card show" style="opacity: 1; transform: translateY(0);">
                     <div class="post-avatar" onclick="window.location.href='personal_page.html'"></div>
-                    <div class="post-body">
-                        <div style="font-size: 16px; color: #333; line-height: 1.6; margin-bottom: 20px;">
-                            發佈內容
+                    <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+                        <div class="post-body">
+                            <div style="font-size: 16px; color: #333; line-height: 1.6;">發佈內容</div>
                         </div>
-                        <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid #EEEEEE; padding-top: 15px; color: #7A7A7A;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 6px; color: #7A7A7A;">
                             <div style="display: flex; gap: 15px;">
                                 <div onclick="toggleEye(this)" style="cursor: pointer; display: flex; align-items: center;">
                                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
@@ -204,6 +209,7 @@
                             <div style="display: flex; gap: 15px;">
                                 <svg onclick="toggleHeart(this)" style="cursor: pointer;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
                                 <svg onclick="toggleBookmark(this)" style="cursor: pointer;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
                             </div>
                         </div>
@@ -213,11 +219,27 @@
                 <!-- Post 4: Image Post -->
                 <div class="post-card show" style="opacity: 1; transform: translateY(0);">
                     <div class="post-avatar" onclick="window.location.href='personal_page.html'"></div>
-                    <div class="post-body" style="padding: 20px;">
-                        <div style="width: 100%; height: 350px; background-color: #CCCCCC; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 20px; box-sizing: border-box; border-radius: 8px;">
-                            <div style="background-color: #333333; border-radius: 20px; display: flex; padding: 8px 20px; gap: 20px; color: white; cursor: pointer;">
-                                <span>&lt;</span>
-                                <span>&gt;</span>
+                    <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+                        <div class="post-body" style="padding: 20px;">
+                            <div style="width: 100%; height: 350px; background-color: #CCCCCC; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 20px; box-sizing: border-box; border-radius: 8px;">
+                                <div style="background-color: #333333; border-radius: 20px; display: flex; padding: 8px 20px; gap: 20px; color: white; cursor: pointer;">
+                                    <span>&lt;</span>
+                                    <span>&gt;</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 6px; color: #7A7A7A;">
+                            <div style="display: flex; gap: 15px;">
+                                <div onclick="toggleEye(this)" style="cursor: pointer; display: flex; align-items: center;">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                                </div>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+                            </div>
+                            <div style="display: flex; gap: 15px;">
+                                <svg onclick="toggleHeart(this)" style="cursor: pointer;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+                                <svg onclick="toggleBookmark(this)" style="cursor: pointer;" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"></path></svg>
                             </div>
                         </div>
                     </div>
