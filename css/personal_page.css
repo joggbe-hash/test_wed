@@ -1,0 +1,70 @@
+.material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        :root {
+            --nav-bg: #8B6E5B;   
+            --content-bg: #E0D8CC; 
+            --card-bg: #FFFFFF;  
+            --text-dark: #333333;
+            --text-gray: #7A7A7A;
+            --hover-bg: #E0E0E0; 
+            --feed-bg: #F4EFEA;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: var(--content-bg);
+            font-family: 'Intel One Mono', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-weight: 400;
+        }
+
+        .app-container { width: 100%; display: flex; flex-direction: column; }
+
+        .navbar { height: 60px; flex-shrink: 0; background-color: var(--nav-bg); display: flex; align-items: center; justify-content: space-between; padding: 0 40px; position: sticky; top: 0; z-index: 100; }
+        .nav-logo { width: 40px; height: 40px; background-color: #000; border-radius: 50%; cursor: pointer; transition: transform 0.2s; }
+        .nav-logo:hover { transform: scale(1.05); }
+        .nav-actions { display: flex; gap: 15px; align-items: center; }
+        .nav-icon { width: 40px; height: 40px; background-color: var(--card-bg); border-radius: 50%; cursor: pointer; }
+        .nav-square { width: 40px; height: 40px; background-color: #4A3320; border-radius: 50%; display: flex; justify-content: center; align-items: center; color: white; cursor: pointer; transition: transform 0.2s; }
+        .nav-square:hover { transform: scale(1.05); }
+        .nav-badge { background-color: var(--card-bg); color: #4A3320; padding: 5px 10px; border-radius: 5px; font-weight: bold; font-size: 14px; cursor: pointer; transition: transform 0.2s; }
+        .nav-badge:hover { transform: scale(1.05); }
+
+        .main-layout { display: flex; width: 100%; margin: 0; padding: 0; gap: 0; min-height: calc(100vh - 60px); }
+
+        .sidebar { width: 380px; display: flex; flex-direction: column; flex-shrink: 0; position: sticky; top: 60px; align-self: flex-start; height: calc(100vh - 60px); border-right: none; background-color: var(--content-bg); }
+
+        .feed-content { flex: 1; display: flex; flex-direction: column; gap: 40px; padding: 40px 10%; padding-bottom: 80px; background-color: var(--feed-bg); box-sizing: border-box; max-width: 1200px; margin: 0 auto; min-height: calc(100vh - 60px); }
+
+        .post-card { display: flex; gap: 25px; align-items: flex-start; }
+        .post-avatar { width: 90px; height: 90px; background-color: var(--card-bg); border-radius: 50%; flex-shrink: 0; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.08); transition: transform 0.3s ease; }
+        .post-avatar.black { background-color: #000; }
+        .post-avatar:hover { transform: scale(1.05); }
+        .post-body { background-color: var(--card-bg); width: 100%; min-width: 0; flex: 1; border-radius: 4px; padding: 30px; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1.5px solid #D8CFC4; transition: box-shadow 0.3s ease; }
+        .post-body:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
+        
+        .profile-btn { flex: 1; background-color: #DCD6CD; color: #4A3320; border: none; padding: 15px; font-size: 16px; font-weight: normal; letter-spacing: 1px; cursor: pointer; border-radius: 4px; text-align: center; transition: all 0.3s ease; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+        .profile-btn:hover { background-color: #C5BFB5; transform: translateY(-2px); box-shadow: 0 6px 15px rgba(0,0,0,0.1); }
+
+        .fab { position: fixed; bottom: 40px; right: 40px; width: 80px; height: 80px; background-color: #4A3320; background-image: linear-gradient(white, white), linear-gradient(white, white); background-position: center; background-repeat: no-repeat; background-size: 40% 4px, 4px 40%; border-radius: 50%; color: transparent; font-size: 0; cursor: pointer; box-shadow: 0 4px 15px rgba(0,0,0,0.2); transition: all 0.3s ease; z-index: 100; text-decoration: none; }
+        .fab:hover { transform: scale(1.1) rotate(90deg); background-color: #331A00; }
+        @media (max-width: 768px) {
+            .navbar { padding: 0 15px; }
+            .nav-actions { gap: 10px; }
+            .nav-logo, .nav-icon, .nav-square { width: 32px; height: 32px; }
+            .nav-badge { font-size: 12px; padding: 3px 6px; }
+            
+            .main-layout { flex-direction: column; }
+            .sidebar { 
+                width: 100%; height: auto; position: static; padding: 20px; 
+                border-right: none; border-bottom: 1px solid #D0D0D0; gap: 15px;
+            }
+            .personal-sidebar-card { height: 80px; }
+            
+            .feed-content { padding: 20px; width: 100%; gap: 20px; }
+            .post-card { flex-direction: column; gap: 15px; }
+            .post-avatar { width: 50px; height: 50px; }
+            .post-body { padding: 15px; }
+            .fab { width: 60px; height: 60px; bottom: 20px; right: 20px; font-size: 35px; }
+        }
