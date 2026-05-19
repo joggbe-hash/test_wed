@@ -1,3 +1,5 @@
+@import url('fonts.css');
+
 :root {
             --nav-bg: #8B6E5B;   
             --content-bg: #E0D8CC; 
@@ -13,9 +15,20 @@
             padding: 0;
             background: url('../picture/meme_background.jpg') no-repeat;
             background-size: 100% 100%;
-            font-family: 'Intel One Mono', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: "Intel One Mono", monospace;
+            font-optical-sizing: auto;
             font-weight: 400;
+            font-style: normal;
             overflow: hidden; 
+        }
+
+        button,
+        input,
+        textarea,
+        select {
+            font-family: "Intel One Mono", monospace;
+            font-optical-sizing: auto;
+            font-style: normal;
         }
 
         .auth-container {

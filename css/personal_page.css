@@ -1,3 +1,5 @@
+@import url('fonts.css');
+
 .material-symbols-outlined {
             font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
         }
@@ -15,8 +17,19 @@
             margin: 0;
             padding: 0;
             background-color: var(--content-bg);
-            font-family: 'Intel One Mono', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: "Intel One Mono", monospace;
+            font-optical-sizing: auto;
             font-weight: 400;
+            font-style: normal;
+        }
+
+        button,
+        input,
+        textarea,
+        select {
+            font-family: "Intel One Mono", monospace;
+            font-optical-sizing: auto;
+            font-style: normal;
         }
 
         .app-container { width: 100%; display: flex; flex-direction: column; }
@@ -37,11 +50,12 @@
 
         .feed-content { flex: 1; display: flex; flex-direction: column; gap: 40px; padding: 40px 10%; padding-bottom: 80px; background-color: var(--feed-bg); box-sizing: border-box; max-width: 1200px; margin: 0 auto; min-height: calc(100vh - 60px); }
 
-        .post-card { display: flex; gap: 25px; align-items: flex-start; }
+        .post-card { display: flex; gap: 25px; align-items: flex-start; font-family: "Intel One Mono", monospace; font-optical-sizing: auto; font-style: normal; }
         .post-avatar { width: 90px; height: 90px; background-color: var(--card-bg); border-radius: 50%; flex-shrink: 0; cursor: pointer; box-shadow: 0 4px 10px rgba(0,0,0,0.08); transition: transform 0.3s ease; }
         .post-avatar.black { background-color: #000; }
         .post-avatar:hover { transform: scale(1.05); }
-        .post-body { background-color: var(--card-bg); width: 100%; min-width: 0; flex: 1; border-radius: 4px; padding: 30px; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1.5px solid #D8CFC4; transition: box-shadow 0.3s ease; }
+        .post-body { background-color: var(--card-bg); width: 100%; min-width: 0; flex: 1; border-radius: 4px; padding: 30px; box-sizing: border-box; position: relative; box-shadow: 0 4px 20px rgba(0,0,0,0.05); border: 1.5px solid #D8CFC4; transition: box-shadow 0.3s ease; font-family: "Intel One Mono", monospace; font-optical-sizing: auto; font-style: normal; }
+        .post-body *, .post-card button { font-family: "Intel One Mono", monospace; font-optical-sizing: auto; font-style: normal; }
         .post-body:hover { box-shadow: 0 8px 30px rgba(0,0,0,0.08); }
         
         .profile-btn { flex: 1; background-color: #DCD6CD; color: #4A3320; border: none; padding: 15px; font-size: 16px; font-weight: normal; letter-spacing: 1px; cursor: pointer; border-radius: 4px; text-align: center; transition: all 0.3s ease; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
