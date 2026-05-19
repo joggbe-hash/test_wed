@@ -1,60 +1,12 @@
 <!DOCTYPE html>
 <html lang="zh-TW">
-<head>
+  <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>登入與註冊</title>
-    <link rel="stylesheet" href="css/index.css">
-</head>
-<body>
-
-    <div class="auth-container">
-        <div class="form-slider" id="slider">
-            
-            <!-- 登入表單 -->
-            <div id="loginForm" class="form-section">
-                <!-- Removed shapes placeholder -->
-
-                <div class="input-group">
-                    <div class="input-label">帳號</div>
-                    <input type="text" class="input-field" placeholder="例如: s123456789">
-                </div>
-
-                <div class="input-group">
-                    <div class="input-label">密碼</div>
-                    <input type="password" class="input-field" placeholder="輸入密碼">
-                </div>
-
-                <div class="forgot-password"><a href="#">忘記密碼</a></div>
-
-                <div class="login-actions">
-                    <button class="btn btn-outline" onclick="toggleForm('register')">註冊</button>
-                    <!-- 點擊跳轉到 first_page.html -->
-                    <button class="btn btn-primary" onclick="window.location.href='first_page.html'">登入</button>
-                </div>
-            </div>
-
-            <!-- 註冊表單 -->
-            <div id="registerForm" class="form-section">
-                <div class="reg-group"><div class="reg-label">電子郵件</div><input type="email" class="reg-input" placeholder="example@email.com"></div>
-                <div class="reg-group"><div class="reg-label">驗證碼</div><input type="text" class="reg-input" placeholder="輸入收到的驗證碼"></div>
-                <div class="reg-group"><div class="reg-label">輸入密碼</div><input type="password" class="reg-input" placeholder="至少8位字元"></div>
-                <div class="reg-group"><div class="reg-label">確認密碼</div><input type="password" class="reg-input" placeholder="再次輸入密碼"></div>
-                <div class="reg-group"><div class="reg-label">使用者名稱</div><input type="text" class="reg-input" placeholder="例如: 王小明"></div>
-
-                <!-- 註冊完成後返回登入畫面 -->
-                <button class="reg-btn" onclick="alert('註冊成功！請登入您的帳號。'); toggleForm('login')">確認註冊</button>
-                
-                <div style="margin-top: 25px;">
-                    <a href="#" style="color: var(--nav-bg); text-decoration: none; font-weight: 500;" onclick="toggleForm('login')">已有帳號？返回登入</a>
-                </div>
-            </div>
-
-        </div>
-    </div>
-
-    
-
-<script src="js/index.js"></script>
-</body>
+    <title>Vue 專題</title>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
 </html>
