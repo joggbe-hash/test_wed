@@ -11,7 +11,7 @@
         body {
             margin: 0;
             padding: 0;
-            background: url('picture/meme_background.jpg') no-repeat;
+            background: url('../picture/meme_background.jpg') no-repeat;
             background-size: 100% 100%;
             font-family: 'Intel One Mono', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             font-weight: 400;
@@ -120,7 +120,7 @@
 
         /* --- 註冊專用樣式 --- */
         #registerForm { 
-            background: url('picture/register_round.jpg') no-repeat; 
+            background: url('../picture/register_round.jpg') no-repeat; 
             background-size: 100% 100%;
             align-items: center; 
             padding: 40px; 
