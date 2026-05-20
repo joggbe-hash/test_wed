@@ -1,11 +1,25 @@
 <script setup>
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '../components/AppNavbar.vue'
+import LoadingPanel from '../components/LoadingPanel.vue'
+import { fetchFreqData } from '../api/timedApi'
 import { usePageCss } from '../composables/usePageCss'
 
 usePageCss('freq_page.css', { materialIcons: true })
 
 const router = useRouter()
+const isLoading = ref(true)
+const timeCards = ref([])
+const stats = ref([])
+
+onMounted(async () => {
+  isLoading.value = true
+  const response = await fetchFreqData()
+  timeCards.value = response.data.timeCards
+  stats.value = response.data.stats
+  isLoading.value = false
+})
 </script>
 
 <template>
@@ -13,17 +27,16 @@ const router = useRouter()
     <AppNavbar />
     <div class="main-layout">
       <div class="sidebar">
-        <div class="time-card">時間</div>
-        <div class="time-card">時間</div>
-        <div class="time-card">時間</div>
+        <div v-for="card in timeCards" :key="card" class="time-card">{{ card }}</div>
       </div>
 
       <div class="feed-content">
-        <div class="stat-item">使用者資料</div>
-        <div class="stat-item">互動數據</div>
-        <div class="stat-item">收藏紀錄</div>
-        <div class="stat-item">設定項目</div>
-        <div class="stat-item logout" @click="router.push('/login')">登出</div>
+        <LoadingPanel v-if="isLoading" />
+
+        <template v-else>
+          <div v-for="item in stats" :key="item" class="stat-item">{{ item }}</div>
+          <div class="stat-item logout" @click="router.push('/login')">登出</div>
+        </template>
       </div>
     </div>
   </div>

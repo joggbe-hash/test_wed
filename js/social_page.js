@@ -44,14 +44,15 @@ let isPrivate = false;
         document.addEventListener('DOMContentLoaded', () => {
             const feed = document.querySelector('.feed-content');
             
-            // Extract only the post-cards to duplicate, so we don't duplicate the theme banner
-            const postCardsHTML = Array.from(feed.querySelectorAll('.post-card'))
-                                       .map(card => card.outerHTML)
-                                       .join('');
+            // Extract only the post-cards to duplicate (excluding the first one which is the input box)
+            const postCards = Array.from(feed.querySelectorAll('.post-card'));
+            const actualPostsHTML = postCards.slice(1) // skip the first card (input box)
+                                             .map(card => card.outerHTML)
+                                             .join('');
             
             // Duplicate the cards 3 times to make "more blocks"
             for (let i = 0; i < 3; i++) {
-                feed.insertAdjacentHTML('beforeend', postCardsHTML);
+                feed.insertAdjacentHTML('beforeend', actualPostsHTML);
             }
 
             // Setup Intersection Observer for slide-up animation
