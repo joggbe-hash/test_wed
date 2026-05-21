@@ -1,10 +1,10 @@
 export interface ApiResponse<T> {
-  data: T;
-  returnedAt: Date;
-  delayMs: number;
+  data: T
+  returnedAt: Date
+  delayMs: number
 }
 
-export function requestByTime<T>(data: T, delayMs: number = 1200): Promise<ApiResponse<T>> {
+export function requestByTime<T>(data: T, delayMs = 1200): Promise<ApiResponse<T>> {
   return new Promise((resolve) => {
     window.setTimeout(() => {
       resolve({
@@ -17,8 +17,8 @@ export function requestByTime<T>(data: T, delayMs: number = 1200): Promise<ApiRe
 }
 
 export interface HomeFeedData {
-  posts: string[];
-  shareText: string;
+  posts: string[]
+  shareText: string
 }
 
 export function fetchHomeFeed(): Promise<ApiResponse<HomeFeedData>> {
@@ -32,26 +32,26 @@ export function fetchHomeFeed(): Promise<ApiResponse<HomeFeedData>> {
 }
 
 export interface ExploreCategory {
-  id: number;
-  name: string;
+  id: number
+  name: string
 }
 
 export interface ExploreCard {
-  id: string;
-  title: string;
-  tags: string;
-  description: string;
-  members: string;
+  id: string
+  title: string
+  tags: string
+  description: string
+  members: string
 }
 
 export interface ExploreRow {
-  id: number;
-  cards: ExploreCard[];
+  id: number
+  cards: ExploreCard[]
 }
 
 export interface ExploreData {
-  categories: ExploreCategory[];
-  rows: ExploreRow[];
+  categories: ExploreCategory[]
+  rows: ExploreRow[]
 }
 
 export function fetchExploreData(): Promise<ApiResponse<ExploreData>> {
@@ -77,14 +77,14 @@ export function fetchExploreData(): Promise<ApiResponse<ExploreData>> {
 }
 
 export interface PersonalProfile {
-  id: string;
-  bio: string;
+  id: string
+  bio: string
 }
 
 export interface PersonalData {
-  profile: PersonalProfile;
-  posts: string[];
-  timer: string;
+  profile: PersonalProfile
+  posts: string[]
+  timer: string
 }
 
 export function fetchPersonalData(): Promise<ApiResponse<PersonalData>> {
@@ -102,8 +102,8 @@ export function fetchPersonalData(): Promise<ApiResponse<PersonalData>> {
 }
 
 export interface FreqData {
-  timeCards: string[];
-  stats: string[];
+  timeCards: string[]
+  stats: string[]
 }
 
 export function fetchFreqData(): Promise<ApiResponse<FreqData>> {
@@ -116,15 +116,17 @@ export function fetchFreqData(): Promise<ApiResponse<FreqData>> {
   )
 }
 
+export type SocialPostType = 'text' | 'image'
+
 export interface SocialPost {
-  id: number;
-  type: string;
-  text: string;
+  id: number
+  type: SocialPostType
+  text: string
 }
 
 export interface SocialData {
-  composerText: string;
-  posts: SocialPost[];
+  composerText: string
+  posts: SocialPost[]
 }
 
 export function fetchSocialData(): Promise<ApiResponse<SocialData>> {
@@ -142,8 +144,8 @@ export function fetchSocialData(): Promise<ApiResponse<SocialData>> {
 }
 
 export interface ProfilePreviewData {
-  username: string;
-  link: string;
+  username: string
+  link: string
 }
 
 export function fetchProfilePreview(): Promise<ApiResponse<ProfilePreviewData>> {
