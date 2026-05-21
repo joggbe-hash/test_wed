@@ -4,9 +4,6 @@ import { useRouter } from 'vue-router'
 import AppNavbar from '../components/AppNavbar.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import { fetchExploreData } from '../api/timedApi'
-import { usePageCss } from '../composables/usePageCss'
-
-usePageCss('explore_page.css', { materialIcons: true })
 
 const router = useRouter()
 const cleanupHandlers = []
@@ -84,22 +81,22 @@ onBeforeUnmount(() => {
     <div class="main-layout">
       <div class="sidebar">
         <div class="sidebar-search">
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7A7A7A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right: 10px;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <svg class="mr-2.5" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#7A7A7A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
           <input type="text" class="sidebar-search-input" placeholder="">
         </div>
-        <div class="grid-icons">
+        <div class="grid-icons gap-x-[15px]">
           <div v-for="item in categories" :key="item.id" class="grid-item">
             <div class="grid-icon-circle"></div>
-            <div style="font-size: 14px; color: #333; margin-top: 5px;">{{ item.name }}</div>
+            <div class="mt-[5px] text-sm text-[#333333]">{{ item.name }}</div>
           </div>
         </div>
       </div>
 
-      <div class="feed-content">
+      <div class="feed-content explore-feed">
         <LoadingPanel v-if="isLoading" />
 
         <template v-else>
-          <div v-for="row in rows" :key="row.id" class="horizontal-scroller" :style="{ marginTop: row.id === 1 ? '0' : '20px' }">
+          <div v-for="row in rows" :key="row.id" class="horizontal-scroller" :class="row.id === 1 ? 'mt-0' : 'mt-5'">
             <div v-for="card in row.cards" :key="card.id" class="explore-card">
               <div class="explore-header">
                 <div class="explore-avatar" @click="router.push('/personal')"></div>

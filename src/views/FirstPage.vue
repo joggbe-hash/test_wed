@@ -6,9 +6,6 @@ import LoadingPanel from '../components/LoadingPanel.vue'
 import PostActions from '../components/PostActions.vue'
 import { ClosedEye, OpenEye } from '../components/Icons.vue'
 import { fetchHomeFeed } from '../api/timedApi'
-import { usePageCss } from '../composables/usePageCss'
-
-usePageCss('first_page.css', { materialIcons: true })
 
 const route = useRoute()
 const router = useRouter()
@@ -50,52 +47,52 @@ onMounted(async () => {
         <LoadingPanel v-if="isLoading && !isIframe" />
 
         <template v-else>
-          <div class="post-card show" style="opacity: 1; transform: translateY(0);">
+          <div class="post-card show">
             <div class="post-avatar" @click="router.push('/personal')"></div>
             <div class="post-body">
-              <div class="post-user-id" style="font-size: 20px; font-family: &quot;Intel One Mono&quot;, monospace; font-optical-sizing: auto; font-weight: 500; font-style: normal; margin-bottom: 15px; color: #4A4A4A;">@yourid</div>
-              <div style="font-size: 18px; color: #333; margin-bottom: 30px;">{{ shareText }}</div>
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; gap: 15px; color: #7A7A7A;">
+              <div class="post-user-id">@yourid</div>
+              <div class="mb-[30px] text-lg text-[#333333]">{{ shareText }}</div>
+              <div class="flex items-center justify-between">
+                <div class="flex gap-[15px] text-muted">
                   <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
-                  <span style="font-size: 20px; font-weight: bold;">@</span>
+                  <span class="text-xl font-bold">@</span>
                 </div>
-                <div style="display: flex; align-items: center; gap: 15px; color: #7A7A7A;">
-                  <div style="cursor: pointer; display: flex; align-items: center;" @click="isPrivate = !isPrivate">
+                <div class="flex items-center gap-[15px] text-muted">
+                  <div class="flex cursor-pointer items-center" @click="isPrivate = !isPrivate">
                     <ClosedEye v-if="isPrivate" />
                     <OpenEye v-else />
                   </div>
-                  <button class="post-action-btn" style="position: static; padding: 10px 25px; background-color: #4A3320; min-width: 120px;" @click="isPrivate = !isPrivate">
-                    {{ isPrivate ? '私人發布' : '公開分享' }}
+                  <button class="post-action-btn min-w-[120px] px-[25px]" @click="isPrivate = !isPrivate">
+                    {{ isPrivate ? '設為公開' : '設為私人' }}
                   </button>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="post-card show" style="opacity: 1; transform: translateY(0);">
+          <div class="post-card show">
             <div class="post-avatar" @click="router.push('/personal')"></div>
             <div class="post-body">
-              <div style="font-size: 14px; color: #7A7A7A;">API 回傳時間：{{ apiReturnedAt }}</div>
+              <div class="text-sm text-muted">API 回傳時間：{{ apiReturnedAt }}</div>
             </div>
           </div>
 
-          <div v-for="post in feedPosts" :key="post" class="post-card show" style="opacity: 1; transform: translateY(0);">
+          <div v-for="post in feedPosts" :key="post" class="post-card show">
             <div class="post-avatar" @click="router.push('/personal')"></div>
-            <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+            <div class="flex min-w-0 flex-1 flex-col">
               <div class="post-body">
-                <div style="font-size: 16px; color: #333; line-height: 1.6;">{{ post }}</div>
+                <div class="text-base leading-[1.6] text-[#333333]">{{ post }}</div>
               </div>
               <PostActions />
             </div>
           </div>
 
-          <div class="post-card show" style="opacity: 1; transform: translateY(0);">
+          <div class="post-card show">
             <div class="post-avatar" @click="router.push('/personal')"></div>
-            <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
-              <div class="post-body" style="padding: 20px;">
-                <div style="width: 100%; height: 350px; background-color: #CCCCCC; display: flex; justify-content: center; align-items: flex-end; padding-bottom: 20px; box-sizing: border-box; border-radius: 8px;">
-                  <div style="background-color: #333333; border-radius: 20px; display: flex; padding: 8px 20px; gap: 20px; color: white; cursor: pointer;">
+            <div class="flex min-w-0 flex-1 flex-col">
+              <div class="post-body p-5">
+                <div class="flex h-[350px] w-full items-end justify-center rounded-lg bg-[#cccccc] pb-5">
+                  <div class="flex cursor-pointer gap-5 rounded-full bg-[#333333] px-5 py-2 text-white">
                     <span>&lt;</span>
                     <span>&gt;</span>
                   </div>

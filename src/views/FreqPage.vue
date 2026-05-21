@@ -4,9 +4,6 @@ import { useRouter } from 'vue-router'
 import AppNavbar from '../components/AppNavbar.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import { fetchFreqData } from '../api/timedApi'
-import { usePageCss } from '../composables/usePageCss'
-
-usePageCss('freq_page.css', { materialIcons: true })
 
 const router = useRouter()
 const isLoading = ref(true)
@@ -25,12 +22,12 @@ onMounted(async () => {
 <template>
   <div class="app-container">
     <AppNavbar />
-    <div class="main-layout">
-      <div class="sidebar">
+    <div class="main-layout freq-layout">
+      <div class="sidebar freq-sidebar">
         <div v-for="card in timeCards" :key="card" class="time-card">{{ card }}</div>
       </div>
 
-      <div class="feed-content">
+      <div class="feed-content freq-feed">
         <LoadingPanel v-if="isLoading" />
 
         <template v-else>

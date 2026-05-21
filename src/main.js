@@ -1,7 +1,7 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHistory } from 'vue-router'
 import App from './App.vue'
-import { preloadPageCss } from './composables/usePageCss'
+import './style.css'
 import LoginPage from './views/LoginPage.vue'
 import FirstPage from './views/FirstPage.vue'
 import ExplorePage from './views/ExplorePage.vue'
@@ -25,15 +25,5 @@ const router = createRouter({
   history: createWebHistory(),
   routes,
 })
-
-preloadPageCss([
-  'index.css',
-  'first_page.css',
-  'explore_page.css',
-  'personal_page.css',
-  'freq_page.css',
-  'introduce_page.css',
-  'social_page.css',
-])
 
 createApp(App).use(router).mount('#app')

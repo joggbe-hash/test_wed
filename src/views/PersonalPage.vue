@@ -4,9 +4,6 @@ import AppNavbar from '../components/AppNavbar.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import PostActions from '../components/PostActions.vue'
 import { fetchPersonalData } from '../api/timedApi'
-import { usePageCss } from '../composables/usePageCss'
-
-usePageCss('personal_page.css', { materialIcons: true })
 
 const isLoading = ref(true)
 const profile = ref({ id: '', bio: '' })
@@ -33,34 +30,34 @@ onMounted(async () => {
         <LoadingPanel v-if="isLoading" />
 
         <template v-else>
-          <div class="post-card">
+          <div class="post-card show">
             <div class="post-avatar"></div>
             <div class="post-body">
-              <div class="post-user-id" style="font-size: 20px; font-family: &quot;Intel One Mono&quot;, monospace; font-optical-sizing: auto; font-weight: 500; font-style: normal; margin-bottom: 15px; color: #333;">{{ profile.id }}</div>
-              <div style="font-size: 16px; color: #333; line-height: 1.6; margin-bottom: 30px;">{{ profile.bio }}</div>
-              <div style="display: flex; gap: 15px;">
+              <div class="post-user-id text-[#333333]">{{ profile.id }}</div>
+              <div class="mb-[30px] text-base leading-[1.6] text-[#333333]">{{ profile.bio }}</div>
+              <div class="flex gap-[15px]">
                 <button class="profile-btn">編輯個人資料</button>
                 <button class="profile-btn">分享個人資料</button>
               </div>
             </div>
           </div>
 
-          <div v-for="post in posts" :key="post" class="post-card">
+          <div v-for="post in posts" :key="post" class="post-card show">
             <div class="post-avatar"></div>
-            <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+            <div class="flex min-w-0 flex-1 flex-col">
               <div class="post-body">
-                <div style="font-size: 16px; color: #333; line-height: 1.6;">{{ post }}</div>
+                <div class="text-base leading-[1.6] text-[#333333]">{{ post }}</div>
               </div>
               <PostActions />
             </div>
           </div>
 
-          <div class="post-card">
+          <div class="post-card show">
             <div class="post-avatar black"></div>
-            <div style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+            <div class="flex min-w-0 flex-1 flex-col">
               <div class="post-body">
-                <div style="font-size: 32px; font-weight: bold; font-family: &quot;Intel One Mono&quot;, monospace; font-optical-sizing: auto; font-style: normal; letter-spacing: 2px; margin-bottom: 20px;">{{ timer }}</div>
-                <div style="width: 100%; height: 250px; background-color: #A0A0A0; border-radius: 4px;"></div>
+                <div class="mb-5 text-[32px] font-bold tracking-[2px]">{{ timer }}</div>
+                <div class="h-[250px] w-full rounded bg-[#a0a0a0]"></div>
               </div>
               <PostActions />
             </div>
