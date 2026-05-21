@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import AppNavbar from '../components/AppNavbar.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
@@ -7,7 +7,7 @@ import { fetchPersonalData } from '../api/timedApi'
 
 const isLoading = ref(true)
 const profile = ref({ id: '', bio: '' })
-const posts = ref([])
+const posts = ref<string[]>([])
 const timer = ref('')
 
 onMounted(async () => {

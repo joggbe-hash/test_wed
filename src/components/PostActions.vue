@@ -1,6 +1,6 @@
-<script setup>
+<script setup lang="ts">
 import { ref } from 'vue'
-import { ClosedEye, OpenEye } from './Icons.vue'
+import { ClosedEye, OpenEye } from './Icons'
 
 const eyeClosed = ref(false)
 const liked = ref(false)

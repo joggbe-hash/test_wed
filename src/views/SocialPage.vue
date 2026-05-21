@@ -1,17 +1,17 @@
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '../components/AppNavbar.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import PostActions from '../components/PostActions.vue'
-import { ClosedEye, OpenEye } from '../components/Icons.vue'
+import { ClosedEye, OpenEye } from '../components/Icons'
 import { fetchSocialData } from '../api/timedApi'
 
 const router = useRouter()
 const isPrivate = ref(false)
 const isLoading = ref(true)
 const composerText = ref('')
-const posts = ref([])
+const posts = ref<any[]>([])
 
 onMounted(async () => {
   isLoading.value = true

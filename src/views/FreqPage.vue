@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '../components/AppNavbar.vue'
@@ -7,8 +7,8 @@ import { fetchFreqData } from '../api/timedApi'
 
 const router = useRouter()
 const isLoading = ref(true)
-const timeCards = ref([])
-const stats = ref([])
+const timeCards = ref<string[]>([])
+const stats = ref<string[]>([])
 
 onMounted(async () => {
   isLoading.value = true

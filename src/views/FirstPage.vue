@@ -1,10 +1,10 @@
-<script setup>
+<script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppNavbar from '../components/AppNavbar.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import PostActions from '../components/PostActions.vue'
-import { ClosedEye, OpenEye } from '../components/Icons.vue'
+import { ClosedEye, OpenEye } from '../components/Icons'
 import { fetchHomeFeed } from '../api/timedApi'
 
 const route = useRoute()
@@ -12,7 +12,7 @@ const router = useRouter()
 const isIframe = computed(() => route.query.isIframe === 'true')
 const isPrivate = ref(false)
 const isLoading = ref(true)
-const feedPosts = ref([])
+const feedPosts = ref<string[]>([])
 const shareText = ref('')
 const apiReturnedAt = ref('')
 

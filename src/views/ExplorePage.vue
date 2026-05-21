@@ -1,25 +1,26 @@
-<script setup>
+<script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import AppNavbar from '../components/AppNavbar.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import { fetchExploreData } from '../api/timedApi'
+import type { ExploreCategory, ExploreRow } from '../api/timedApi'
 
 const router = useRouter()
-const cleanupHandlers = []
+const cleanupHandlers: Array<() => void> = []
 const isLoading = ref(true)
-const categories = ref([])
-const rows = ref([])
+const categories = ref<ExploreCategory[]>([])
+const rows = ref<ExploreRow[]>([])
 
 function bindHorizontalScrollers() {
   cleanupHandlers.splice(0).forEach((cleanup) => cleanup())
 
-  document.querySelectorAll('.horizontal-scroller').forEach((slider) => {
+  document.querySelectorAll('.horizontal-scroller').forEach((el) => { const slider = el as HTMLElement;
     let isDown = false
     let startX = 0
     let scrollLeft = 0
 
-    const onMouseDown = (event) => {
+    const onMouseDown = (event: MouseEvent) => {
       isDown = true
       slider.style.cursor = 'grabbing'
       startX = event.pageX - slider.offsetLeft
@@ -34,14 +35,14 @@ function bindHorizontalScrollers() {
       }
     }
 
-    const onMouseMove = (event) => {
+    const onMouseMove = (event: MouseEvent) => {
       if (!isDown) return
       event.preventDefault()
       const x = event.pageX - slider.offsetLeft
       slider.scrollLeft = scrollLeft - (x - startX)
     }
 
-    const onWheel = (event) => {
+    const onWheel = (event: WheelEvent) => {
       event.preventDefault()
       slider.scrollLeft += event.deltaY
     }

@@ -1,4 +1,3 @@
-<script>
 import { h } from 'vue'
 
 const iconProps = {
@@ -31,4 +30,3 @@ export const ClosedEye = {
     ])
   },
 }
-</script>
