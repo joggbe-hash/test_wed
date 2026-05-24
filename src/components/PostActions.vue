@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
-import { ClosedEye, OpenEye } from './Icons'
 
-const eyeClosed = ref(false)
 const liked = ref(false)
 const bookmarked = ref(false)
 </script>
@@ -10,10 +8,6 @@ const bookmarked = ref(false)
 <template>
   <div class="flex items-center justify-between px-1.5 py-3 text-muted">
     <div class="flex gap-[15px]">
-      <div class="flex cursor-pointer items-center" @click="eyeClosed = !eyeClosed">
-        <ClosedEye v-if="eyeClosed" />
-        <OpenEye v-else />
-      </div>
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
     </div>
     <div class="flex gap-[15px]">
