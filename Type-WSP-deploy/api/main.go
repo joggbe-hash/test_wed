@@ -49,6 +49,7 @@ func main() {
 	// 貼文相關路由（需要登入，由 requireAuth 中介層保護）
 	mux.HandleFunc("GET /api/feed", requireAuth(handleFeed))
 	mux.HandleFunc("POST /api/posts", requireAuth(handleCreatePost))
+	mux.HandleFunc("DELETE /api/posts/{id}", requireAuth(handleDeletePost))
 
 	// WebSocket 即時通知（Worker 處理完圖片後推送給前端）
 	mux.HandleFunc("GET /api/ws/", handleWebSocket)

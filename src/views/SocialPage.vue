@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { ApiError, createPost, fetchFeed } from '../api/backendApi'
+import { ApiError, createPost, deletePost, fetchFeed } from '../api/backendApi'
 import type { BackendPost } from '../api/backendApi'
 import AppNavbar from '../components/AppNavbar.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
@@ -13,8 +13,37 @@ const isPrivate = ref(false)
 const isLoading = ref(true)
 const isSubmitting = ref(false)
 const composerText = ref('')
+const imageInput = ref<HTMLInputElement | null>(null)
+const selectedImages = ref<File[]>([])
+const activeImageIndex = ref(0)
 const posts = ref<BackendPost[]>([])
 const errorMessage = ref('')
+const openPostMenuId = ref<number | null>(null)
+const currentImageIndices = ref<Record<number, number>>({})
+
+function nextImage(post: BackendPost) {
+  if (!post.image_urls || post.image_urls.length <= 1) return
+  const current = currentImageIndices.value[post.id] || 0
+  currentImageIndices.value[post.id] = (current + 1) % post.image_urls.length
+}
+
+function prevImage(post: BackendPost) {
+  if (!post.image_urls || post.image_urls.length <= 1) return
+  const current = currentImageIndices.value[post.id] || 0
+  currentImageIndices.value[post.id] = current === 0 ? post.image_urls.length - 1 : current - 1
+}
+
+function setImage(post: BackendPost, index: number) {
+  currentImageIndices.value[post.id] = index
+}
+
+const imagePreviews = computed(() =>
+  selectedImages.value.map((image) => ({
+    name: image.name,
+    url: URL.createObjectURL(image),
+  })),
+)
+const activeImagePreview = computed(() => imagePreviews.value[activeImageIndex.value])
 
 async function loadPosts() {
   try {
@@ -32,14 +61,35 @@ async function loadPosts() {
 
 async function handleCreatePost() {
   const content = composerText.value.trim()
-  if (!content || isSubmitting.value) {
+  if ((!content && selectedImages.value.length === 0) || isSubmitting.value) {
     return
   }
 
   isSubmitting.value = true
   try {
-    await createPost(content)
+    const result = await createPost(content, selectedImages.value)
+    
+    // 如果有上傳圖片，等待後端處理完成再發文
+    if (selectedImages.value.length > 0) {
+      let isProcessed = false
+      let attempts = 0
+      while (!isProcessed && attempts < 20) {
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        const response = await fetchFeed()
+        const newPost = response.posts.find(p => p.id === result.post_id)
+        if (!newPost || newPost.image_status !== 'processing') {
+          isProcessed = true
+        }
+        attempts++
+      }
+    }
+
     composerText.value = ''
+    selectedImages.value = []
+    activeImageIndex.value = 0
+    if (imageInput.value) {
+      imageInput.value.value = ''
+    }
     await loadPosts()
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) {
@@ -49,6 +99,55 @@ async function handleCreatePost() {
     errorMessage.value = error instanceof Error ? error.message : '發文失敗'
   } finally {
     isSubmitting.value = false
+  }
+}
+
+function openImagePicker() {
+  imageInput.value?.click()
+}
+
+function handleImageChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  selectedImages.value = Array.from(input.files ?? [])
+  activeImageIndex.value = 0
+}
+
+function showPreviousImage() {
+  if (selectedImages.value.length <= 1) {
+    return
+  }
+  activeImageIndex.value =
+    activeImageIndex.value === 0 ? selectedImages.value.length - 1 : activeImageIndex.value - 1
+}
+
+function showNextImage() {
+  if (selectedImages.value.length <= 1) {
+    return
+  }
+  activeImageIndex.value = (activeImageIndex.value + 1) % selectedImages.value.length
+}
+
+function removeActiveImage() {
+  selectedImages.value = selectedImages.value.filter((_, index) => index !== activeImageIndex.value)
+  if (activeImageIndex.value >= selectedImages.value.length) {
+    activeImageIndex.value = Math.max(selectedImages.value.length - 1, 0)
+  }
+  if (selectedImages.value.length === 0 && imageInput.value) {
+    imageInput.value.value = ''
+  }
+}
+
+async function handleDeletePost(postId: number) {
+  try {
+    await deletePost(postId)
+    posts.value = posts.value.filter((post) => post.id !== postId)
+    openPostMenuId.value = null
+  } catch (error) {
+    if (error instanceof ApiError && error.status === 401) {
+      await router.push('/login')
+      return
+    }
+    errorMessage.value = error instanceof Error ? error.message : '刪除貼文失敗'
   }
 }
 
@@ -111,9 +210,70 @@ onMounted(async () => {
 
                 <hr class="my-3 border-[#eaddcf]">
 
+                <div v-if="activeImagePreview" class="mb-3">
+                  <div class="relative flex aspect-[4/3] w-full max-w-[520px] items-center justify-center overflow-hidden bg-white p-4">
+                    <img :src="activeImagePreview.url" :alt="activeImagePreview.name" class="h-full w-full object-cover">
+                    <button
+                      v-if="selectedImages.length > 1"
+                      type="button"
+                      class="absolute left-4 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-full bg-[#333333]/80 text-xl font-bold text-white"
+                      aria-label="上一張圖片"
+                      @click="showPreviousImage"
+                    >
+                      &lt;
+                    </button>
+                    <button
+                      v-if="selectedImages.length > 1"
+                      type="button"
+                      class="absolute right-4 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-full bg-[#333333]/80 text-xl font-bold text-white"
+                      aria-label="下一張圖片"
+                      @click="showNextImage"
+                    >
+                      &gt;
+                    </button>
+                    <button
+                      type="button"
+                      class="absolute right-4 top-4 flex size-8 items-center justify-center rounded-full bg-[#4a3320] text-sm font-bold text-white"
+                      aria-label="移除圖片"
+                      @click="removeActiveImage"
+                    >
+                      x
+                    </button>
+                  </div>
+                  <div class="mt-2 flex max-w-[520px] justify-center gap-2">
+                    <button
+                      v-for="(_, index) in selectedImages"
+                      :key="index"
+                      type="button"
+                      class="h-3 w-3 border-0"
+                      :class="index === activeImageIndex ? 'bg-[#4a3320]' : 'bg-[#d9d9d9]'"
+                      :aria-label="`第 ${index + 1} 張圖片`"
+                      @click="activeImageIndex = index"
+                    ></button>
+                    <span class="ml-2 text-sm font-bold text-muted">
+                      {{ activeImageIndex + 1 }} / {{ selectedImages.length }}
+                    </span>
+                  </div>
+                </div>
+
                 <div class="flex items-center justify-between">
                   <div class="flex shrink-0 gap-3 text-[#a59a91]">
-                    <svg class="cursor-pointer transition-colors hover:text-[#4a3320]" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    <button
+                      type="button"
+                      class="cursor-pointer border-0 bg-transparent p-0 text-current transition-colors hover:text-[#4a3320]"
+                      aria-label="選擇圖片"
+                      @click="openImagePicker"
+                    >
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    </button>
+                    <input
+                      ref="imageInput"
+                      type="file"
+                      class="sr-only"
+                      accept="image/*"
+                      multiple
+                      @change="handleImageChange"
+                    >
                     <div class="flex h-[20px] w-[26px] cursor-pointer items-center justify-center rounded border-[1.5px] border-current text-[9px] font-black transition-colors hover:text-[#4a3320]">GIF</div>
                     <svg class="cursor-pointer transition-colors hover:text-[#4a3320]" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
                   </div>
@@ -125,7 +285,7 @@ onMounted(async () => {
                     </div>
                     <button
                       class="rounded-full bg-[#4a3320] px-5 py-1.5 text-sm font-bold text-white opacity-90 shadow-sm transition-colors hover:bg-[#382618] hover:opacity-100 disabled:cursor-not-allowed disabled:opacity-50"
-                      :disabled="isSubmitting || !composerText.trim()"
+                      :disabled="isSubmitting || (!composerText.trim() && selectedImages.length === 0)"
                       @click="handleCreatePost"
                     >
                       {{ isSubmitting ? '發佈中' : '發文' }}
@@ -144,16 +304,78 @@ onMounted(async () => {
             <div class="post-avatar" @click="router.push('/personal')"></div>
             <div class="flex min-w-0 flex-1 flex-col">
               <div class="post-body">
+                <div class="absolute right-4 top-4">
+                  <button
+                    type="button"
+                    class="flex size-8 items-center justify-center rounded-full border-0 bg-transparent transition-colors hover:bg-[#f4efea]"
+                    aria-label="貼文設定"
+                    @click.stop="openPostMenuId = openPostMenuId === post.id ? null : post.id"
+                  >
+                    <img src="/icons/settings.png" alt="" class="size-5 opacity-75">
+                  </button>
+                  <div
+                    v-if="openPostMenuId === post.id"
+                    class="absolute right-0 top-9 z-20 w-32 overflow-hidden rounded bg-white shadow-[0_8px_20px_rgba(0,0,0,0.15)]"
+                  >
+                    <button
+                      type="button"
+                      class="w-full border-0 bg-white px-4 py-3 text-left text-sm font-bold text-[#cc3333] hover:bg-[#f5d5d5]"
+                      @click.stop="handleDeletePost(post.id)"
+                    >
+                      刪除貼文
+                    </button>
+                  </div>
+                </div>
                 <div class="post-user-id">{{ post.username }}</div>
                 <div v-if="post.content" class="text-base leading-[1.6] text-[#333333]">{{ post.content }}</div>
-                <div v-if="post.image_urls?.length" class="mt-5 flex flex-col gap-3">
+                <div v-if="post.image_urls?.length" class="mt-5 relative w-full min-h-[300px] bg-[#f4efea] overflow-hidden rounded-lg flex items-center justify-center">
                   <img
-                    v-for="imageUrl in post.image_urls"
-                    :key="imageUrl"
-                    :src="imageUrl"
+                    :src="post.image_urls[currentImageIndices[post.id] || 0]"
                     alt=""
-                    class="max-h-[420px] w-full rounded-lg object-cover"
+                    class="max-h-[500px] w-full object-cover transition-opacity duration-300"
+                    @error="($event.target as HTMLImageElement).style.opacity = '0'"
+                    @load="($event.target as HTMLImageElement).style.opacity = '1'"
                   >
+                  
+                  <!-- 上一頁按鈕 -->
+                  <button
+                    v-if="post.image_urls.length > 1"
+                    type="button"
+                    class="absolute left-3 top-1/2 flex size-[30px] -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow-sm transition-colors hover:bg-white"
+                    @click.stop="prevImage(post)"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                  </button>
+                  
+                  <!-- 下一頁按鈕 -->
+                  <button
+                    v-if="post.image_urls.length > 1"
+                    type="button"
+                    class="absolute right-3 top-1/2 flex size-[30px] -translate-y-1/2 items-center justify-center rounded-full bg-white/90 text-gray-700 shadow-sm transition-colors hover:bg-white"
+                    @click.stop="nextImage(post)"
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                  </button>
+                  
+                  <!-- 右上角數字標示 -->
+                  <div
+                    v-if="post.image_urls.length > 1"
+                    class="absolute right-4 top-4 rounded-full bg-black/60 px-2.5 py-1 text-xs font-medium text-white backdrop-blur-sm"
+                  >
+                    {{ (currentImageIndices[post.id] || 0) + 1 }} / {{ post.image_urls.length }}
+                  </div>
+
+                  <!-- 底部小圓點 -->
+                  <div v-if="post.image_urls.length > 1" class="absolute bottom-4 left-0 right-0 flex justify-center gap-[5px]">
+                    <button
+                      v-for="(_, index) in post.image_urls"
+                      :key="index"
+                      type="button"
+                      class="size-[6px] rounded-full transition-colors"
+                      :class="index === (currentImageIndices[post.id] || 0) ? 'bg-white' : 'bg-white/40'"
+                      @click.stop="setImage(post, index)"
+                    />
+                  </div>
                 </div>
                 <div v-else-if="post.image_status === 'processing'" class="h-[350px] w-full rounded bg-[#e0e0e0]"></div>
               </div>

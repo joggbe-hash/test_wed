@@ -42,10 +42,22 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   })
 
   const text = await response.text()
-  const data = text ? JSON.parse(text) : null
+  const contentType = response.headers.get('Content-Type') ?? ''
+  const isJson = contentType.includes('application/json')
+  const data = text && isJson ? JSON.parse(text) : null
 
   if (!response.ok) {
-    throw new ApiError(response.status, data?.error ?? data?.message ?? 'API request failed')
+    throw new ApiError(
+      response.status,
+      data?.error ?? data?.message ?? text.slice(0, 120) ?? 'API request failed',
+    )
+  }
+
+  if (!isJson) {
+    throw new ApiError(
+      response.status,
+      `Expected JSON from ${path}, but received ${contentType || 'unknown content type'}`,
+    )
   }
 
   return data as T
@@ -103,5 +115,11 @@ export function createPost(content: string, images: File[] = []) {
   return apiFetch<{ message: string; post_id: number }>('/api/posts', {
     method: 'POST',
     body: formData,
+  })
+}
+
+export function deletePost(postId: number) {
+  return apiFetch<{ message: string }>(`/api/posts/${postId}`, {
+    method: 'DELETE',
   })
 }

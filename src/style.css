@@ -64,7 +64,7 @@
   }
 
   .nav-actions {
-    @apply flex items-center justify-end gap-2.5 max-md:gap-1.5;
+    @apply flex shrink-0 items-center justify-end gap-2.5 whitespace-nowrap max-md:gap-1.5;
   }
 
   .nav-badge {
@@ -76,7 +76,7 @@
   }
 
   .side-menu-bar {
-    @apply max-w-none flex-row items-center justify-end gap-2 text-white;
+    @apply w-auto max-w-none flex-row items-center justify-end gap-2 text-white;
   }
 
   .side-menu-bar .side-menu-item {
@@ -109,6 +109,11 @@
 
   .side-menu-icon svg {
     @apply size-[24px];
+  }
+
+  .side-menu-image-icon {
+    @apply size-6 object-contain;
+    filter: invert(1);
   }
 
   .material-symbols-outlined {

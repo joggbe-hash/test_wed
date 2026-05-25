@@ -121,6 +121,14 @@ async function handleRegister() {
         <div class="reg-group">
           <div class="reg-label">電子信箱</div>
           <input v-model="email" type="email" class="reg-input" placeholder="example@email.com" autocomplete="email">
+          <button
+            type="button"
+            class="ml-3 shrink-0 rounded-full bg-[#a67c52] px-5 py-3 text-sm font-semibold text-white transition-all duration-300 hover:bg-nav disabled:cursor-not-allowed disabled:opacity-60 max-md:ml-0 max-md:mt-2 max-md:w-full"
+            :disabled="isSubmitting"
+            @click="handleSendCode"
+          >
+            取得驗證碼
+          </button>
         </div>
         <div class="reg-group">
           <div class="reg-label">使用者名稱</div>
@@ -139,8 +147,7 @@ async function handleRegister() {
           <input v-model="code" type="text" class="reg-input" placeholder="請輸入驗證碼">
         </div>
 
-        <div class="flex w-full max-w-[650px] justify-center gap-5">
-          <button type="button" class="reg-btn mt-0" :disabled="isSubmitting" @click="handleSendCode">取得驗證碼</button>
+        <div class="flex w-full max-w-[650px] justify-center">
           <button type="submit" class="reg-btn mt-0" :disabled="isSubmitting || !canRegister">確認註冊</button>
         </div>
 

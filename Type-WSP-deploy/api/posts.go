@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/google/uuid"
@@ -20,7 +21,7 @@ type Post struct {
 	UserID      int       `json:"user_id"`
 	Username    string    `json:"username"`
 	Content     string    `json:"content,omitempty"`
-	ImageURLs   []string  `json:"image_urls,omitempty"`  // JSON 陣列，多張圖片
+	ImageURLs   []string  `json:"image_urls,omitempty"` // JSON 陣列，多張圖片
 	ImageStatus string    `json:"image_status"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -153,6 +154,29 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 	createImagePost(ctx, w, user, content, files)
 }
 
+func handleDeletePost(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
+	postID, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil || postID <= 0 {
+		writeJSON(w, http.StatusBadRequest, M{"error": "invalid post id"})
+		return
+	}
+
+	ctx := r.Context()
+	tag, err := systemPool.Exec(ctx, "DELETE FROM posts WHERE id = $1 AND user_id = $2", postID, user.ID)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "delete post failed"})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		writeJSON(w, http.StatusNotFound, M{"error": "post not found"})
+		return
+	}
+
+	rdb.Del(ctx, feedCacheKey)
+	writeJSON(w, http.StatusOK, M{"message": "post deleted"})
+}
+
 type fileEntry struct {
 	reader io.ReadCloser
 	size   int64
@@ -225,8 +249,8 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 	job, _ := json.Marshal(M{
 		"type": "process_image_post",
 		"payload": M{
-			"post_id": postID,
-			"user_id": user.ID,
+			"post_id":  postID,
+			"user_id":  user.ID,
 			"raw_keys": rawKeys,
 		},
 	})
