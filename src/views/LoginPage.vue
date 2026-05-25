@@ -131,6 +131,10 @@ async function handleRegister() {
           </button>
         </div>
         <div class="reg-group">
+          <div class="reg-label">驗證碼</div>
+          <input v-model="code" type="text" class="reg-input" placeholder="請輸入驗證碼">
+        </div>
+        <div class="reg-group">
           <div class="reg-label">使用者名稱</div>
           <input v-model="username" type="text" class="reg-input" placeholder="請輸入暱稱" autocomplete="username">
         </div>
@@ -142,16 +146,12 @@ async function handleRegister() {
           <div class="reg-label">確認密碼</div>
           <input v-model="confirmPassword" type="password" class="reg-input" placeholder="再次輸入密碼" autocomplete="new-password">
         </div>
-        <div class="reg-group">
-          <div class="reg-label">驗證碼</div>
-          <input v-model="code" type="text" class="reg-input" placeholder="請輸入驗證碼">
-        </div>
 
         <div class="flex w-full max-w-[650px] justify-center">
           <button type="submit" class="reg-btn mt-0" :disabled="isSubmitting || !canRegister">確認註冊</button>
         </div>
 
-        <div v-if="statusMessage || errorMessage" class="mt-5 text-sm font-bold text-[#4a3320]">
+        <div v-if="statusMessage || errorMessage" class="mt-5 text-sm font-bold" :class="errorMessage || (statusMessage && statusMessage.includes('驗證碼已送出')) ? 'text-red-600' : 'text-[#4a3320]'">
           {{ errorMessage || statusMessage }}
         </div>
 
