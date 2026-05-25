@@ -2,6 +2,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
+    "build:pages": "vue-tsc && vite build --base=/test_wed/",
+    "build:backend": "vue-tsc && vite build --base=/ --outDir=Type-WSP-deploy/frontend/dist --emptyOutDir",
     "preview": "vite preview"
   },
   "dependencies": {

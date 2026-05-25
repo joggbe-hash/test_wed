@@ -1,0 +1,165 @@
+# ======================================================
+# Nginx HTTPS 主設定檔（取代 OWASP CRS 映像的預設 default.conf）
+# 變數 ${VAR} 由容器啟動時 envsubst 處理
+# nginx 自身變數（如 $host）使用 ${DOLLAR}host 避免被 envsubst 吃掉
+# ======================================================
+
+# 隱藏 nginx 版本號，防止版本資訊洩露
+server_tokens off;
+
+# WebSocket 升級所需的 map（將 Upgrade header 映射為 Connection 值）
+map ${DOLLAR}http_upgrade ${DOLLAR}connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+# --- 速率限制區 ---
+# api_general：一般 API 請求，每秒 30 個
+limit_req_zone ${DOLLAR}binary_remote_addr zone=api_general:10m rate=30r/s;
+# api_login：登入/註冊端點，每分鐘 5 個（防暴力破解）
+limit_req_zone ${DOLLAR}binary_remote_addr zone=api_login:10m rate=5r/m;
+# perip：每 IP 最大同時連線數
+limit_conn_zone ${DOLLAR}binary_remote_addr zone=perip:10m;
+
+# --- 上游後端（Go API server） ---
+upstream api_backend {
+    server ${BACKEND_HOST}:${BACKEND_PORT} max_fails=3 fail_timeout=10s;
+    keepalive 32;  # 保持長連線，減少 TCP 握手開銷
+}
+
+# --- HTTP 伺服器：強制重導到 HTTPS ---
+server {
+    listen ${PORT} default_server;
+    listen [::]:${PORT} default_server;
+    server_name ${SERVER_NAME};
+
+    # Let's Encrypt ACME challenge（正式環境用 certbot 時需要）
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    # 所有 HTTP 請求 301 重導到 HTTPS
+    location / {
+        return 301 https://${DOLLAR}host${DOLLAR}request_uri;
+    }
+}
+
+# --- HTTPS 主伺服器 ---
+server {
+    listen ${SSL_PORT} ssl default_server;
+    listen [::]:${SSL_PORT} ssl default_server;
+    server_name ${SERVER_NAME};
+
+    # --- SSL 憑證設定 ---
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # --- 安全回應標頭 ---
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+    # CSP：允許 unsafe-inline 因前端使用 onclick 行內事件
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self' wss:;" always;
+
+    # --- 連線與上傳限制 ---
+    limit_conn perip 50;           # 每 IP 最多 50 個同時連線
+    client_max_body_size 100m;     # 上傳檔案上限 100MB
+    client_body_timeout  60s;
+    client_header_timeout 10s;
+
+    # --- 日誌 ---
+    access_log /var/log/nginx/access.log combined;
+    error_log  /var/log/nginx/error.log warn;
+
+    # --- Gzip 壓縮 ---
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml+rss;
+
+    # ======================================================
+    # 路由 1：/api/* → 反向代理到 Go API server
+    # proxy_pass 不帶尾部斜線，完整路徑傳遞給後端
+    # ======================================================
+    location /api/ {
+        limit_req zone=api_general burst=60 nodelay;
+
+        proxy_pass         http://api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
+        proxy_set_header   X-Forwarded-For   ${DOLLAR}proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
+        proxy_set_header   Connection        "";
+
+        proxy_connect_timeout 5s;
+        proxy_send_timeout    30s;
+        proxy_read_timeout    30s;
+
+        proxy_buffering       on;
+        proxy_buffer_size     4k;
+        proxy_buffers         8 16k;
+    }
+
+    # --- 登入/註冊端點：加嚴格限流（防暴力破解）---
+    # regex location 優先於上方的 prefix location
+    location ~ ^/api/(auth|login|register)/ {
+        limit_req zone=api_login burst=10 nodelay;
+
+        proxy_pass         http://api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
+        proxy_set_header   X-Forwarded-For   ${DOLLAR}proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
+    }
+
+    # --- WebSocket 代理（即時通知推送）---
+    location /api/ws/ {
+        proxy_pass         http://api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade           ${DOLLAR}http_upgrade;
+        proxy_set_header   Connection        ${DOLLAR}connection_upgrade;
+        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
+        proxy_read_timeout 3600s;  # WebSocket 長連線，1 小時超時
+    }
+
+    # ======================================================
+    # 路由 2：/ → 前端靜態檔（掛載自 ./frontend/dist）
+    # try_files 支援多頁面 HTML 和 SPA fallback
+    # ======================================================
+    location / {
+        root /usr/share/nginx/html;
+        try_files ${DOLLAR}uri ${DOLLAR}uri/ /index.html;
+
+        # 靜態資源快取 30 天
+        location ~* \.(?:css|js|woff2?|ttf|eot|otf|svg|png|jpg|jpeg|gif|webp|ico)$ {
+            root /usr/share/nginx/html;
+            expires 30d;
+            add_header Cache-Control "public, immutable";
+            access_log off;
+        }
+    }
+
+    # --- 健康檢查端點 ---
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+        add_header Content-Type text/plain;
+    }
+
+    # --- 隱藏敏感檔案（.git, .env, .htaccess 等）---
+    location ~ /\.(ht|git|env) {
+        deny all;
+        return 404;
+    }
+}

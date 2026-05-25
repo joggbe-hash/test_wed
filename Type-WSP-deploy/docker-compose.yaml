@@ -1,0 +1,170 @@
+services:
+
+  # ===== DMZ Layer (web_net) =====
+  nginx:
+    image: owasp/modsecurity-crs:nginx
+    container_name: nginx-waf
+    ports:
+      - "80:8080"
+      - "443:8443"
+    environment:
+      # --- 反向代理後端 (供 server.conf.template 使用) ---
+      BACKEND_HOST: api
+      BACKEND_PORT: 5000
+      SERVER_NAME: localhost
+      PORT: 8080
+      SSL_PORT: 8443
+      # envsubst 保留 nginx 的 $ 變數用
+      DOLLAR: $
+      # --- ModSecurity / OWASP CRS 設定 ---
+      MODSEC_RULE_ENGINE: On
+      MODSEC_AUDIT_LOG: /dev/stdout
+      MODSEC_AUDIT_ENGINE: RelevantOnly
+      MODSEC_REQ_BODY_LIMIT: 104857600   # 100MB,對齊 nginx client_max_body_size
+      MODSEC_REQ_BODY_NOFILES_LIMIT: 131072
+      PARANOIA: 1                        # 1=寬鬆 4=最嚴,先從 1 開始
+      ANOMALY_INBOUND: 5
+      ANOMALY_OUTBOUND: 4
+      BLOCKING_PARANOIA: 1
+    volumes:
+      # 取代預設 default.conf (HTTPS + 反向代理 + 靜態前端 + 限流)
+      - ./nginx/templates/conf.d/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
+      # SSL 憑證
+      - ./nginx/certs:/etc/nginx/certs:ro
+      # ModSecurity CRS 排除規則 (掛到 CRS 規則目錄,覆蓋預設的同名空檔)
+      - ./nginx/modsec/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
+      - ./nginx/modsec/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf:ro
+      # 前端 SPA 靜態檔輸出目錄 (build 後的產物)
+      - ./frontend/dist:/usr/share/nginx/html:ro
+    networks:
+      - web_net
+      - app_net
+    depends_on:
+      - api
+    restart: unless-stopped
+
+  # ===== Application Layer (app_net) =====
+  api:
+    build: ./api
+    container_name: api-server
+    expose:
+      - "5000"
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB_SYSTEM: system_db
+      POSTGRES_DB_USER: user_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+    networks:
+      - app_net
+      - db_net
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis-queue
+    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - app_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  worker:
+    build: ./worker
+    environment:
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB_SYSTEM: system_db
+      POSTGRES_DB_USER: user_db
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+    networks:
+      - app_net
+      - db_net
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    deploy:
+      replicas: 2
+    restart: unless-stopped
+
+  # ===== Data Layer (db_net) =====
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: system_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - db_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio-storage
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio_data:/data
+    networks:
+      - db_net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+networks:
+  web_net:
+    name: web_net
+    driver: bridge
+  app_net:
+    name: app_net
+    driver: bridge
+  db_net:
+    name: db_net
+    driver: bridge
+    internal: true   # 資料層完全不對外,只能由 app_net 的服務訪問
+
+volumes:
+  redis_data:
+  postgres_data:
+  minio_data:
