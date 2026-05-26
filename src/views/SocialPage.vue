@@ -20,6 +20,7 @@ const posts = ref<BackendPost[]>([])
 const errorMessage = ref('')
 const openPostMenuId = ref<number | null>(null)
 const currentImageIndices = ref<Record<number, number>>({})
+const imageViewer = ref<{ urls: string[], index: number } | null>(null)
 
 function nextImage(post: BackendPost) {
   if (!post.image_urls || post.image_urls.length <= 1) return
@@ -35,6 +36,25 @@ function prevImage(post: BackendPost) {
 
 function setImage(post: BackendPost, index: number) {
   currentImageIndices.value[post.id] = index
+}
+
+function openImageViewer(urls: string[], index: number) {
+  imageViewer.value = { urls, index }
+}
+
+function closeImageViewer() {
+  imageViewer.value = null
+}
+
+function showPreviousViewerImage() {
+  if (!imageViewer.value || imageViewer.value.urls.length <= 1) return
+  imageViewer.value.index =
+    imageViewer.value.index === 0 ? imageViewer.value.urls.length - 1 : imageViewer.value.index - 1
+}
+
+function showNextViewerImage() {
+  if (!imageViewer.value || imageViewer.value.urls.length <= 1) return
+  imageViewer.value.index = (imageViewer.value.index + 1) % imageViewer.value.urls.length
 }
 
 const imagePreviews = computed(() =>
@@ -211,8 +231,8 @@ onMounted(async () => {
                 <hr class="my-3 border-[#eaddcf]">
 
                 <div v-if="activeImagePreview" class="mb-3">
-                  <div class="relative flex aspect-[4/3] w-full max-w-[520px] items-center justify-center overflow-hidden bg-white p-4">
-                    <img :src="activeImagePreview.url" :alt="activeImagePreview.name" class="h-full w-full object-cover">
+                  <div class="relative flex w-full max-w-[640px] items-center justify-center overflow-hidden rounded-[16px] border border-[#d8d1ca] bg-white">
+                    <img :src="activeImagePreview.url" :alt="activeImagePreview.name" class="block h-auto max-h-[520px] max-w-full object-contain">
                     <button
                       v-if="selectedImages.length > 1"
                       type="button"
@@ -328,13 +348,14 @@ onMounted(async () => {
                 </div>
                 <div class="post-user-id">{{ post.username }}</div>
                 <div v-if="post.content" class="text-base leading-[1.6] text-[#333333]">{{ post.content }}</div>
-                <div v-if="post.image_urls?.length" class="mt-5 relative w-full min-h-[300px] bg-[#f4efea] overflow-hidden rounded-lg flex items-center justify-center">
+                <div v-if="post.image_urls?.length" class="relative mt-5 flex w-full items-center justify-center overflow-hidden rounded-[16px] border border-[#d8d1ca] bg-white">
                   <img
                     :src="post.image_urls[currentImageIndices[post.id] || 0]"
                     alt=""
-                    class="max-h-[500px] w-full object-cover transition-opacity duration-300"
+                    class="block h-auto max-h-[680px] max-w-full cursor-zoom-in object-contain transition-opacity duration-300"
                     @error="($event.target as HTMLImageElement).style.opacity = '0'"
                     @load="($event.target as HTMLImageElement).style.opacity = '1'"
+                    @click="openImageViewer(post.image_urls, currentImageIndices[post.id] || 0)"
                   >
                   
                   <!-- 上一頁按鈕 -->
@@ -386,5 +407,54 @@ onMounted(async () => {
       </div>
     </div>
     <div class="fab"></div>
+
+    <div
+      v-if="imageViewer"
+      class="fixed inset-0 z-[300] flex items-center justify-center bg-black/90"
+      @click="closeImageViewer"
+    >
+      <button
+        type="button"
+        class="absolute left-5 top-5 flex size-11 items-center justify-center rounded-full bg-black/60 text-3xl text-white transition-colors hover:bg-white/15"
+        aria-label="關閉圖片"
+        @click.stop="closeImageViewer"
+      >
+        ×
+      </button>
+
+      <button
+        v-if="imageViewer.urls.length > 1"
+        type="button"
+        class="absolute left-5 top-1/2 flex size-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-3xl text-white transition-colors hover:bg-white/15"
+        aria-label="上一張圖片"
+        @click.stop="showPreviousViewerImage"
+      >
+        ‹
+      </button>
+
+      <img
+        :src="imageViewer.urls[imageViewer.index]"
+        alt=""
+        class="max-h-[82dvh] max-w-[92vw] object-contain"
+        @click.stop
+      >
+
+      <button
+        v-if="imageViewer.urls.length > 1"
+        type="button"
+        class="absolute right-5 top-1/2 flex size-12 -translate-y-1/2 items-center justify-center rounded-full bg-black/60 text-3xl text-white transition-colors hover:bg-white/15"
+        aria-label="下一張圖片"
+        @click.stop="showNextViewerImage"
+      >
+        ›
+      </button>
+
+      <div class="absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-16 text-white">
+        <button type="button" class="text-2xl" aria-label="回覆" @click.stop>♡</button>
+        <button type="button" class="text-2xl" aria-label="轉發" @click.stop>↻</button>
+        <button type="button" class="text-2xl" aria-label="喜歡" @click.stop>♥</button>
+        <button type="button" class="text-2xl" aria-label="分享" @click.stop>⇧</button>
+      </div>
+    </div>
   </div>
 </template>

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import { fetchProfilePreview } from '../api/timedApi'
@@ -31,10 +31,19 @@ function closePreview() {
 }
 
 onMounted(async () => {
+  if (props.overlay) {
+    document.body.style.overflow = 'hidden'
+  }
   isLoading.value = true
   const response = await fetchProfilePreview()
   profile.value = response.data
   isLoading.value = false
+})
+
+onBeforeUnmount(() => {
+  if (props.overlay) {
+    document.body.style.overflow = ''
+  }
 })
 </script>
 

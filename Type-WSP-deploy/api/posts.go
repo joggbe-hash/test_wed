@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"mime"
 	"net/http"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -133,7 +136,13 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 			if err != nil {
 				continue
 			}
-			files = append(files, &fileEntry{reader: f, size: fh.Size})
+			contentType, extension := imageFileInfo(fh.Header.Get("Content-Type"), fh.Filename)
+			files = append(files, &fileEntry{
+				reader:      f,
+				size:        fh.Size,
+				contentType: contentType,
+				extension:   extension,
+			})
 		}
 	}
 
@@ -178,8 +187,34 @@ func handleDeletePost(w http.ResponseWriter, r *http.Request) {
 }
 
 type fileEntry struct {
-	reader io.ReadCloser
-	size   int64
+	reader      io.ReadCloser
+	size        int64
+	contentType string
+	extension   string
+}
+
+func imageFileInfo(fhContentType, filename string) (string, string) {
+	contentType := strings.ToLower(strings.TrimSpace(fhContentType))
+	extension := strings.ToLower(filepath.Ext(filename))
+
+	if contentType == "" {
+		contentType = mime.TypeByExtension(extension)
+	}
+	if contentType == "" {
+		contentType = "image/jpeg"
+	}
+
+	switch contentType {
+	case "image/jpeg", "image/jpg":
+		return "image/jpeg", ".jpg"
+	case "image/png":
+		return "image/png", ".png"
+	default:
+		if extension == ".png" {
+			return "image/png", ".png"
+		}
+		return "image/jpeg", ".jpg"
+	}
 }
 
 // createTextPost 純文字貼文，直接寫 DB
@@ -210,9 +245,9 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 	// 步驟 1：逐一上傳原始圖片到 MinIO
 	var rawKeys []string
 	for _, f := range files {
-		rawKey := fmt.Sprintf("raw/%s.jpg", uuid.New().String())
+		rawKey := fmt.Sprintf("raw/%s%s", uuid.New().String(), f.extension)
 		_, err := minioClient.PutObject(ctx, minioBucket, rawKey, f.reader, f.size,
-			minio.PutObjectOptions{ContentType: "image/jpeg"})
+			minio.PutObjectOptions{ContentType: f.contentType})
 		if err != nil {
 			ops.Execute()
 			writeJSON(w, http.StatusInternalServerError, M{"error": "圖片上傳失敗"})

@@ -361,7 +361,7 @@
   }
 
   .introduce-container {
-    @apply fixed inset-0 z-[200] flex items-center justify-center overflow-hidden;
+    @apply fixed inset-0 z-[200] flex h-dvh items-center justify-center overflow-hidden p-4;
   }
 
   .modal-backdrop {
