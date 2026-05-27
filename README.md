@@ -25,6 +25,25 @@ http://localhost:5173/
 
 ## 3. 開 Docker 全端版
 
+這會在目前這台電腦用 Docker 開一整套本機服務：
+
+- `nginx`：對外網站入口
+- `api`：Go 後端
+- `worker`：圖片處理與背景工作
+- `postgres`：本機資料庫
+- `redis`：session、驗證碼、工作佇列
+- `minio`：本機圖片儲存
+
+資料會存在這台電腦自己的 Docker volume，不會自動連到其他人的資料庫。
+
+第一次啟動前先建立本機環境變數檔：
+
+```powershell
+cd Type-WSP-deploy
+copy .env.example .env
+cd ..
+```
+
 先把前端 build 到 Docker nginx 使用的資料夾：
 
 ```powershell
