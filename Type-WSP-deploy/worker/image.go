@@ -26,21 +26,18 @@ type processedImage struct {
 	extension   string
 }
 
-// processImagePost 處理帶有圖片的發文任務
-// API 已將貼文寫入 DB（status=processing），此函式負責：
-// 1. 逐一下載原始圖片 → 壓縮/縮圖 → 上傳處理後圖片
-// 2. 更新 DB 記錄（image_url 改為處理後路徑，status 改為 ready）
-// 3. 清理原始圖片
+// processImagePost 是圖文貼文的非同步流程：
+// 1. 從 MinIO raw/ 讀原圖。
+// 2. 修正 EXIF 方向，必要時縮圖並重新壓縮。
+// 3. 把處理後的圖片存到 processed/，更新 DB 為 ready，並通知前端。
 func processImagePost(ctx context.Context, payload ImagePostPayload) {
 	ops := NewAtomicRollback()
 	var processedKeys []string
 
-	// 逐一處理每張圖片
 	for _, rawKey := range payload.RawKeys {
-		// 從 MinIO 下載原始圖片
 		rawObj, err := minioClient.GetObject(ctx, minioBucket, rawKey, minio.GetObjectOptions{})
 		if err != nil {
-			log.Printf("[image] 下載原始圖片失敗 key=%s: %v", rawKey, err)
+			log.Printf("[image] get raw object failed key=%s: %v", rawKey, err)
 			markPostFailed(ctx, payload.PostID)
 			ops.Execute()
 			return
@@ -49,28 +46,26 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) {
 		rawData, err := io.ReadAll(rawObj)
 		rawObj.Close()
 		if err != nil {
-			log.Printf("[image] 讀取原始圖片失敗: %v", err)
+			log.Printf("[image] read raw object failed: %v", err)
 			markPostFailed(ctx, payload.PostID)
 			ops.Execute()
 			return
 		}
 
-		// 壓縮/縮圖
 		processed, err := resizeAndCompress(rawData)
 		if err != nil {
-			log.Printf("[image] 圖片處理失敗: %v", err)
+			log.Printf("[image] process image failed: %v", err)
 			markPostFailed(ctx, payload.PostID)
 			ops.Execute()
 			return
 		}
 
-		// 上傳處理後的圖片
 		processedKey := "processed/" + rawKey[4:len(rawKey)-len(filepath.Ext(rawKey))] + processed.extension
 		reader := bytes.NewReader(processed.data)
 		_, err = minioClient.PutObject(ctx, minioBucket, processedKey, reader, int64(len(processed.data)),
 			minio.PutObjectOptions{ContentType: processed.contentType})
 		if err != nil {
-			log.Printf("[image] 上傳處理後圖片失敗: %v", err)
+			log.Printf("[image] put processed object failed: %v", err)
 			markPostFailed(ctx, payload.PostID)
 			ops.Execute()
 			return
@@ -78,51 +73,47 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) {
 
 		processedKeys = append(processedKeys, processedKey)
 		capturedKey := processedKey
-		ops.Add("刪除處理後圖片 "+processedKey, func() error {
+		ops.Add("remove processed object "+processedKey, func() error {
 			return minioClient.RemoveObject(ctx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
 		})
 	}
 
-	// 更新 DB：將 image_url 改為處理後的路徑陣列，status 改為 ready
 	processedJSON, _ := json.Marshal(processedKeys)
 	_, err := systemPool.Exec(ctx,
 		`UPDATE posts SET image_url = $1, image_status = 'ready' WHERE id = $2`,
 		string(processedJSON), payload.PostID,
 	)
 	if err != nil {
-		log.Printf("[image] 更新貼文 DB 失敗: %v", err)
+		log.Printf("[image] update post image state failed: %v", err)
 		ops.Execute()
 		return
 	}
 
-	// 清理原始圖片（非關鍵操作）
 	for _, rawKey := range payload.RawKeys {
 		if err := minioClient.RemoveObject(ctx, minioBucket, rawKey, minio.RemoveObjectOptions{}); err != nil {
-			log.Printf("[image] 清理原始圖片失敗（非致命）: %v", err)
+			log.Printf("[image] remove raw object failed, ignored: %v", err)
 		}
 	}
 
-	// 清除 feed 快取
 	rdb.Del(ctx, "feed:latest")
 
-	// 透過 Redis Pub/Sub 通知前端（API 的 WebSocket 會轉發給該使用者）
 	notifyChannel := fmt.Sprintf("notify:user:%d", payload.UserID)
 	notifyMsg := fmt.Sprintf(`{"type":"post_ready","post_id":%d}`, payload.PostID)
 	rdb.Publish(ctx, notifyChannel, notifyMsg)
 
-	log.Printf("[image] 貼文 #%d 處理完成，共 %d 張圖片", payload.PostID, len(processedKeys))
+	log.Printf("[image] post #%d processed, files=%d", payload.PostID, len(processedKeys))
 }
 
-// markPostFailed 將貼文的圖片狀態標記為 failed
 func markPostFailed(ctx context.Context, postID int) {
 	systemPool.Exec(ctx, `UPDATE posts SET image_status = 'failed' WHERE id = $1`, postID)
 }
 
-// resizeAndCompress 解碼圖片，只有超過尺寸上限才等比例縮放，避免小圖被二次壓縮。
+// resizeAndCompress 保留原圖格式：PNG 繼續輸出 PNG，其餘格式輸出 JPEG。
+// 小於 maxDimension 且方向正常時直接回傳原始 bytes，避免不必要的畫質損失。
 func resizeAndCompress(data []byte) (*processedImage, error) {
 	src, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("圖片解碼失敗（格式: %s）: %w", format, err)
+		return nil, fmt.Errorf("decode image failed, format=%s: %w", format, err)
 	}
 	orientation := imageOrientation(data)
 	src = applyOrientation(src, orientation)
@@ -157,7 +148,7 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 	var buf bytes.Buffer
 	if format == "png" {
 		if err := png.Encode(&buf, dst); err != nil {
-			return nil, fmt.Errorf("PNG 編碼失敗: %w", err)
+			return nil, fmt.Errorf("encode PNG failed: %w", err)
 		}
 		return &processedImage{
 			data:        buf.Bytes(),
@@ -167,7 +158,7 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 	}
 
 	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: jpegQuality}); err != nil {
-		return nil, fmt.Errorf("JPEG 編碼失敗: %w", err)
+		return nil, fmt.Errorf("encode JPEG failed: %w", err)
 	}
 
 	return &processedImage{

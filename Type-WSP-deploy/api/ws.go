@@ -9,16 +9,14 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// upgrader 負責將 HTTP 連線升級為 WebSocket
+// upgrader 把 HTTP 連線升級成 WebSocket；第一版先放寬 origin，正式版應改成白名單。
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
 
-// handleWebSocket 處理 GET /api/ws/
-// 驗證 session cookie → 升級為 WebSocket → 訂閱 Redis 通知頻道
-// 當 Worker 處理完圖片後，透過 Redis Pub/Sub 發送信號，此處轉發給前端
+// handleWebSocket 驗證 session 後訂閱該使用者的 Redis channel。
+// Worker 完成圖片處理時 publish，API 再把通知轉給前端。
 func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	// 透過 session cookie 驗證使用者身份
 	cookie, err := r.Cookie("session")
 	if err != nil {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
@@ -30,15 +28,13 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 將 HTTP 連線升級為 WebSocket
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("WebSocket 升級失敗: %v", err)
+		log.Printf("upgrade WebSocket failed: %v", err)
 		return
 	}
 	defer conn.Close()
 
-	// 訂閱該使用者專屬的 Redis 通知頻道
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -46,7 +42,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	sub := rdb.Subscribe(ctx, channel)
 	defer sub.Close()
 
-	// 背景 goroutine：持續讀取 WebSocket 以偵測客戶端斷線
 	go func() {
 		for {
 			if _, _, err := conn.ReadMessage(); err != nil {
@@ -56,7 +51,6 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// 主迴圈：將 Redis Pub/Sub 的訊息即時轉發到 WebSocket
 	ch := sub.Channel()
 	for {
 		select {

@@ -1,3 +1,5 @@
+import router from '../router'
+
 export interface User {
   id: number
   username: string
@@ -31,6 +33,7 @@ export class ApiError extends Error {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
 
+// Frontend 所有後端請求都經過這裡，統一處理 cookie、JSON header、錯誤格式和 401 導回登入。
 async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
@@ -47,6 +50,10 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const data = text && isJson ? JSON.parse(text) : null
 
   if (!response.ok) {
+    if (response.status === 401) {
+      router.push('/login')
+    }
+
     throw new ApiError(
       response.status,
       data?.error ?? data?.message ?? text.slice(0, 120) ?? 'API request failed',

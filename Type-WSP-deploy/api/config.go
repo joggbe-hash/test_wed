@@ -2,31 +2,31 @@ package main
 
 import "os"
 
-// Config 集中管理所有外部服務的連線參數，全部從環境變數讀取
+// Config 集中管理 API 需要的環境變數；Docker Compose 會覆蓋這裡的開發預設值。
 type Config struct {
-	// PostgreSQL 連線參數
+	// PostgreSQL 連線設定。system_db 存貼文，user_db 存帳號。
 	PostgresHost     string
 	PostgresPort     string
 	PostgresUser     string
 	PostgresPassword string
-	DBSystem         string // system_db：存放貼文等系統資料
-	DBUser           string // user_db：存放使用者帳號資料
+	DBSystem         string
+	DBUser           string
 
-	// Redis 連線字串（格式：redis://:password@host:port/db）
+	// Redis 同時用於 session、驗證碼、工作佇列和 WebSocket 通知。
 	RedisURL string
 
-	// MinIO 物件儲存連線參數
+	// MinIO 用於儲存原始圖片與 worker 壓縮後的圖片。
 	MinioEndpoint  string
 	MinioAccessKey string
 	MinioSecretKey string
-	MinioBucket    string // 統一的上傳 bucket 名稱
+	MinioBucket    string
 
-	// Session 加密金鑰與存活時間
+	// Session cookie 會保存 signed session id，實際 user data 放 Redis。
 	SecretKey  string
-	SessionTTL int // 秒，預設 86400（24 小時）
+	SessionTTL int
 }
 
-// LoadConfig 從環境變數載入設定，若未設定則使用開發用預設值
+// LoadConfig 從環境變數讀取設定；本機直接跑 API 時會使用 fallback。
 func LoadConfig() *Config {
 	return &Config{
 		PostgresHost:     envOr("POSTGRES_HOST", "localhost"),
@@ -45,7 +45,6 @@ func LoadConfig() *Config {
 	}
 }
 
-// envOr 讀取環境變數，若不存在則回傳 fallback 值
 func envOr(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

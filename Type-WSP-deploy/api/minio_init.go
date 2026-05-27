@@ -8,37 +8,35 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// 全域 MinIO 客戶端，用於圖片上傳與讀取
+// minioClient 由 API 上傳原始圖片與讀取處理後圖片共用。
 var minioClient *minio.Client
 
-// minioBucket 儲存目前使用的 bucket 名稱
+// minioBucket 是專案共用 bucket，raw/ 與 processed/ 以 key prefix 區分。
 var minioBucket string
 
-// InitMinio 建立 MinIO 連線並確保上傳用的 bucket 存在
 func InitMinio(cfg *Config) {
 	var err error
 	minioClient, err = minio.New(cfg.MinioEndpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
-		Secure: false, // 容器內部通訊不需 TLS
+		Secure: false,
 	})
 	if err != nil {
-		log.Fatalf("MinIO 連線失敗: %v", err)
+		log.Fatalf("connect MinIO failed: %v", err)
 	}
 
 	minioBucket = cfg.MinioBucket
 
-	// 若 bucket 不存在則自動建立
 	ctx := context.Background()
 	exists, err := minioClient.BucketExists(ctx, minioBucket)
 	if err != nil {
-		log.Fatalf("檢查 MinIO bucket 失敗: %v", err)
+		log.Fatalf("check MinIO bucket failed: %v", err)
 	}
 	if !exists {
 		if err := minioClient.MakeBucket(ctx, minioBucket, minio.MakeBucketOptions{}); err != nil {
-			log.Fatalf("建立 MinIO bucket 失敗: %v", err)
+			log.Fatalf("create MinIO bucket failed: %v", err)
 		}
-		log.Printf("已建立 MinIO bucket: %s", minioBucket)
+		log.Printf("created MinIO bucket: %s", minioBucket)
 	}
 
-	log.Println("MinIO 連線已建立")
+	log.Println("MinIO client initialized")
 }

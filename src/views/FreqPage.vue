@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import AppNavbar from '../components/AppNavbar.vue'
+import MainLayout from '../layouts/MainLayout.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import { fetchFreqData } from '../api/timedApi'
 
@@ -20,21 +20,21 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="app-container">
-    <AppNavbar />
-    <div class="main-layout freq-layout">
-      <div class="sidebar freq-sidebar">
-        <div v-for="card in timeCards" :key="card" class="time-card">{{ card }}</div>
-      </div>
+  <MainLayout
+    active-nav="freq"
+    layout-class="freq-layout"
+    sidebar-class="freq-sidebar"
+    feed-class="freq-feed"
+  >
+    <template #sidebar>
+      <div v-for="card in timeCards" :key="card" class="time-card">{{ card }}</div>
+    </template>
 
-      <div class="feed-content freq-feed">
-        <LoadingPanel v-if="isLoading" />
+    <LoadingPanel v-if="isLoading" />
 
-        <template v-else>
-          <div v-for="item in stats" :key="item" class="stat-item">{{ item }}</div>
-          <div class="stat-item logout" @click="router.push('/login')">登出</div>
-        </template>
-      </div>
-    </div>
-  </div>
+    <template v-else>
+      <div v-for="item in stats" :key="item" class="stat-item">{{ item }}</div>
+      <div class="stat-item logout" @click="router.push('/login')">登出</div>
+    </template>
+  </MainLayout>
 </template>

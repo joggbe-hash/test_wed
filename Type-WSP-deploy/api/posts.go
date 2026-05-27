@@ -18,13 +18,13 @@ import (
 	"github.com/minio/minio-go/v7"
 )
 
-// Post 代表一則貼文的完整資料結構
+// Post 是 feed API 回給前端的貼文格式；image_urls 會是可直接載入的 API URL。
 type Post struct {
 	ID          int       `json:"id"`
 	UserID      int       `json:"user_id"`
 	Username    string    `json:"username"`
 	Content     string    `json:"content,omitempty"`
-	ImageURLs   []string  `json:"image_urls,omitempty"` // JSON 陣列，多張圖片
+	ImageURLs   []string  `json:"image_urls,omitempty"`
 	ImageStatus string    `json:"image_status"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -32,13 +32,11 @@ type Post struct {
 const feedCacheKey = "feed:latest"
 const feedCacheTTL = 30 * time.Second
 
-// handleFeed 處理 GET /api/feed
-// 回傳最新 20 筆貼文，支援 cursor 分頁
+// handleFeed 讀取最新 20 筆貼文。第一頁使用 Redis 快取，cursor 分頁直接查 DB。
 func handleFeed(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	cursor := r.URL.Query().Get("cursor")
 
-	// 僅在無 cursor（首頁載入）時使用快取
 	if cursor == "" {
 		if cached, err := rdb.Get(ctx, feedCacheKey).Bytes(); err == nil {
 			w.Header().Set("Content-Type", "application/json")
@@ -60,7 +58,7 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 			 FROM posts ORDER BY created_at DESC LIMIT 20`)
 	}
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": "查詢失敗"})
+		writeJSON(w, http.StatusInternalServerError, M{"error": "load feed failed"})
 		return
 	}
 	defer rows.Close()
@@ -71,13 +69,12 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 		var imgURLRaw, imgStatus *string
 		if err := rows.Scan(&p.ID, &p.UserID, &p.Username, &p.Content,
 			&imgURLRaw, &imgStatus, &p.CreatedAt); err != nil {
-			log.Printf("掃描貼文列失敗: %v", err)
+			log.Printf("scan post failed: %v", err)
 			continue
 		}
 		if imgStatus != nil {
 			p.ImageStatus = *imgStatus
 		}
-		// image_url 欄位儲存 JSON 陣列，解析後加上代理路徑前綴
 		if imgURLRaw != nil && *imgURLRaw != "" {
 			var keys []string
 			if err := json.Unmarshal([]byte(*imgURLRaw), &keys); err == nil {
@@ -105,21 +102,18 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, result)
 }
 
-// handleCreatePost 處理 POST /api/posts
-// 純文字 → API 直接寫 DB
-// 有圖片 → 先寫 DB (status=processing) 讓前端立即看到，再丟 Worker 處理圖片
+// handleCreatePost 同時支援 JSON 純文字貼文，以及 multipart 圖文貼文。
+// 圖片先存 raw/ 到 MinIO，DB 標記 processing，再交給 worker 壓縮與轉存 processed/。
 func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	ctx := r.Context()
 
-	// 嘗試解析 multipart form（上限 100MB）
 	if err := r.ParseMultipartForm(100 << 20); err != nil {
-		// 非 multipart → JSON 純文字貼文
 		var body struct {
 			Content string `json:"content"`
 		}
 		if err := readJSON(r, &body); err != nil || body.Content == "" {
-			writeJSON(w, http.StatusBadRequest, M{"error": "content 為必填欄位"})
+			writeJSON(w, http.StatusBadRequest, M{"error": "content is required"})
 			return
 		}
 		createTextPost(ctx, w, user, body.Content)
@@ -128,7 +122,6 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 
 	content := r.FormValue("content")
 
-	// 取得所有上傳的圖片檔案（欄位名稱 "images"）
 	var files []*fileEntry
 	if r.MultipartForm != nil && r.MultipartForm.File != nil {
 		for _, fh := range r.MultipartForm.File["images"] {
@@ -148,7 +141,7 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 
 	if len(files) == 0 {
 		if content == "" {
-			writeJSON(w, http.StatusBadRequest, M{"error": "content 為必填欄位"})
+			writeJSON(w, http.StatusBadRequest, M{"error": "content is required"})
 			return
 		}
 		createTextPost(ctx, w, user, content)
@@ -217,7 +210,6 @@ func imageFileInfo(fhContentType, filename string) (string, string) {
 	}
 }
 
-// createTextPost 純文字貼文，直接寫 DB
 func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, content string) {
 	var postID int
 	err := WithTx(ctx, systemPool, func(tx pgx.Tx) error {
@@ -228,21 +220,17 @@ func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, cont
 		).Scan(&postID)
 	})
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": "發文失敗"})
+		writeJSON(w, http.StatusInternalServerError, M{"error": "create post failed"})
 		return
 	}
 
 	rdb.Del(ctx, feedCacheKey)
-	writeJSON(w, http.StatusCreated, M{"message": "發文成功", "post_id": postID})
+	writeJSON(w, http.StatusCreated, M{"message": "post created", "post_id": postID})
 }
 
-// createImagePost 帶圖貼文
-// 流程：上傳原圖到 MinIO → 先寫 DB（status=processing）→ 丟任務給 Worker
-// 這樣前端刷新 feed 馬上能看到「圖片處理中」的貼文，不會消失
 func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, content string, files []*fileEntry) {
 	ops := NewAtomicRollback()
 
-	// 步驟 1：逐一上傳原始圖片到 MinIO
 	var rawKeys []string
 	for _, f := range files {
 		rawKey := fmt.Sprintf("raw/%s%s", uuid.New().String(), f.extension)
@@ -250,17 +238,16 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 			minio.PutObjectOptions{ContentType: f.contentType})
 		if err != nil {
 			ops.Execute()
-			writeJSON(w, http.StatusInternalServerError, M{"error": "圖片上傳失敗"})
+			writeJSON(w, http.StatusInternalServerError, M{"error": "upload image failed"})
 			return
 		}
 		rawKeys = append(rawKeys, rawKey)
 		capturedKey := rawKey
-		ops.Add("刪除 MinIO 原始圖片 "+rawKey, func() error {
+		ops.Add("remove raw object "+rawKey, func() error {
 			return minioClient.RemoveObject(ctx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
 		})
 	}
 
-	// 步驟 2：先寫入 DB，狀態為 processing，前端立即可見
 	rawKeysJSON, _ := json.Marshal(rawKeys)
 	var postID int
 	err := WithTx(ctx, systemPool, func(tx pgx.Tx) error {
@@ -272,15 +259,14 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 	})
 	if err != nil {
 		ops.Execute()
-		writeJSON(w, http.StatusInternalServerError, M{"error": "發文失敗"})
+		writeJSON(w, http.StatusInternalServerError, M{"error": "create post failed"})
 		return
 	}
-	ops.Add("刪除 DB 貼文記錄", func() error {
+	ops.Add("delete post row", func() error {
 		_, e := systemPool.Exec(ctx, "DELETE FROM posts WHERE id = $1", postID)
 		return e
 	})
 
-	// 步驟 3：丟任務給 Worker 做圖片壓縮處理
 	job, _ := json.Marshal(M{
 		"type": "process_image_post",
 		"payload": M{
@@ -291,15 +277,15 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 	})
 	if err := rdb.RPush(ctx, "task_queue", job).Err(); err != nil {
 		ops.Execute()
-		writeJSON(w, http.StatusInternalServerError, M{"error": "任務排程失敗"})
+		writeJSON(w, http.StatusInternalServerError, M{"error": "enqueue image job failed"})
 		return
 	}
 
 	rdb.Del(ctx, feedCacheKey)
-	writeJSON(w, http.StatusCreated, M{"message": "發文成功，圖片處理中", "post_id": postID})
+	writeJSON(w, http.StatusCreated, M{"message": "post created, image processing", "post_id": postID})
 }
 
-// handleGetImage 從 MinIO 讀取圖片並串流回傳給客戶端
+// handleGetImage 從 MinIO 讀圖並由 API 回傳，前端不用知道物件儲存內部位址。
 func handleGetImage(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
 	if key == "" {

@@ -2,26 +2,22 @@ package main
 
 import "os"
 
-// Config 集中管理 Worker 所需的外部服務連線參數
+// Config 是 worker 啟動所需設定；worker 不處理登入，所以不需要 user_db/session 設定。
 type Config struct {
-	// PostgreSQL 連線參數
 	PostgresHost     string
 	PostgresPort     string
 	PostgresUser     string
 	PostgresPassword string
-	DBSystem         string // system_db：Worker 寫入處理完成的貼文
+	DBSystem         string
 
-	// Redis 連線字串
 	RedisURL string
 
-	// MinIO 物件儲存連線參數
 	MinioEndpoint  string
 	MinioAccessKey string
 	MinioSecretKey string
 	MinioBucket    string
 }
 
-// LoadConfig 從環境變數載入 Worker 設定
 func LoadConfig() *Config {
 	return &Config{
 		PostgresHost:     envOr("POSTGRES_HOST", "localhost"),
