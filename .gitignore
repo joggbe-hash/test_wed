@@ -1,4 +1,7 @@
 .agents/
+.claude/skills/
 skills-lock.json
 node_modules/
 dist/
+!Type-WSP-deploy/frontend/dist/
+!Type-WSP-deploy/frontend/dist/**

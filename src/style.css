@@ -64,7 +64,7 @@
   }
 
   .nav-actions {
-    @apply flex items-center justify-end gap-2.5 max-md:gap-1.5;
+    @apply flex shrink-0 items-center justify-end gap-2.5 whitespace-nowrap max-md:gap-1.5;
   }
 
   .nav-badge {
@@ -76,7 +76,7 @@
   }
 
   .side-menu-bar {
-    @apply max-w-none flex-row items-center justify-end gap-2 text-white;
+    @apply w-auto max-w-none flex-row items-center justify-end gap-2 text-white;
   }
 
   .side-menu-bar .side-menu-item {
@@ -109,6 +109,11 @@
 
   .side-menu-icon svg {
     @apply size-[24px];
+  }
+
+  .side-menu-image-icon {
+    @apply size-6 object-contain;
+    filter: invert(1);
   }
 
   .material-symbols-outlined {
@@ -181,6 +186,143 @@
 
   .post-action-btn-large {
     @apply flex-1 cursor-pointer rounded bg-brown p-3 text-center text-base tracking-[2px] text-white transition-colors duration-300 hover:bg-brown-dark;
+  }
+
+  .x-post {
+    @apply mb-4 flex w-full items-start gap-5 bg-transparent px-2 py-2;
+  }
+
+  .x-post-avatar {
+    @apply mt-2 flex size-[70px] shrink-0 cursor-pointer items-center justify-center rounded-full border border-[#eaeaea] bg-white text-transparent shadow-[0_2px_10px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-85;
+  }
+
+  .x-post-main {
+    @apply min-w-0 flex-1 rounded-sm border border-[#e0e0e0] bg-white p-6 text-[#7a7a7a] shadow-[0_2px_8px_rgba(0,0,0,0.04)];
+  }
+
+  .x-post-header {
+    @apply mb-2 flex min-w-0 items-start justify-between gap-3;
+  }
+
+  .x-post-name {
+    @apply flex min-w-0 flex-wrap items-center gap-1 text-[15px] font-bold leading-5;
+  }
+
+  .x-post-handle {
+    @apply font-normal text-[#536471];
+  }
+
+  .x-post-menu-btn {
+    @apply flex size-8 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent transition-colors hover:bg-[#eff3f4];
+  }
+
+  .x-post-menu {
+    @apply absolute right-0 top-9 z-20 w-32 overflow-hidden rounded-lg bg-white shadow-[0_8px_24px_rgba(15,20,25,0.18)];
+  }
+
+  .x-post-delete {
+    @apply w-full cursor-pointer border-0 bg-white px-4 py-3 text-left text-sm font-bold text-[#f4212e] hover:bg-[#f7f9f9];
+  }
+
+  .x-post-text {
+    @apply mt-1 whitespace-pre-wrap break-words text-[15px] italic leading-[1.8] text-[#8a8a8a];
+  }
+
+  .x-media-grid {
+    @apply mt-3 grid w-full overflow-hidden rounded-[16px] border border-[#cfd9de] bg-[#eff3f4];
+    aspect-ratio: 16 / 9;
+  }
+
+  .x-media-grid-1 {
+    @apply grid-cols-1;
+  }
+
+  .x-media-grid-2 {
+    @apply grid-cols-2;
+  }
+
+  .x-media-grid-3,
+  .x-media-grid-4 {
+    @apply grid-cols-2 grid-rows-2;
+  }
+
+  .x-media-grid-3 .x-media-tile:first-child {
+    @apply row-span-2;
+  }
+
+  .x-media-tile {
+    @apply relative min-h-0 min-w-0 cursor-pointer overflow-hidden border-0 bg-[#eff3f4] p-0;
+  }
+
+  .x-media-tile + .x-media-tile {
+    @apply border-l border-white;
+  }
+
+  .x-media-grid-3 .x-media-tile:nth-child(3),
+  .x-media-grid-4 .x-media-tile:nth-child(3),
+  .x-media-grid-4 .x-media-tile:nth-child(4) {
+    @apply border-t border-white;
+  }
+
+  .x-media-tile img {
+    @apply h-full w-full object-cover transition-transform duration-200 hover:scale-[1.02];
+  }
+
+  .x-media-more {
+    @apply absolute inset-0 flex items-center justify-center bg-black/45 text-3xl font-bold text-white;
+  }
+
+  .x-media-processing {
+    @apply mt-3 flex h-[220px] items-center justify-center rounded-[16px] border border-[#cfd9de] bg-[#eff3f4] text-sm font-bold text-[#536471];
+  }
+
+  .compose-media-grid {
+    @apply mb-3 grid w-full max-w-[640px] gap-1 overflow-hidden rounded-[16px];
+    min-height: 140px;
+  }
+
+  .compose-media-grid-1 {
+    @apply grid-cols-1;
+  }
+
+  .compose-media-grid-2 {
+    @apply grid-cols-2;
+  }
+
+  .compose-media-grid-3,
+  .compose-media-grid-4 {
+    @apply grid-cols-2;
+  }
+
+  .compose-media-grid-1 .compose-media-tile {
+    aspect-ratio: 16 / 9;
+  }
+
+  .compose-media-grid-2 .compose-media-tile,
+  .compose-media-grid-3 .compose-media-tile,
+  .compose-media-grid-4 .compose-media-tile {
+    aspect-ratio: 1.62 / 1;
+  }
+
+  .compose-media-grid-3 .compose-media-tile:first-child {
+    @apply row-span-2;
+    aspect-ratio: auto;
+  }
+
+  .compose-media-tile {
+    @apply relative min-h-[132px] overflow-hidden bg-[#20231d];
+  }
+
+  .compose-media-tile img {
+    @apply h-full w-full object-cover;
+  }
+
+  .compose-edit-btn {
+    @apply absolute left-4 top-4 rounded-full border-0 bg-[#0f1419]/90 px-4 py-1.5 text-sm font-bold text-white;
+  }
+
+  .compose-remove-btn {
+    @apply absolute right-3 top-3 flex size-8 cursor-pointer items-center justify-center rounded-full border-0 bg-[#0f1419]/80 text-2xl leading-none text-white transition-colors hover:bg-[#0f1419];
   }
 
   .profile-btn {
@@ -356,7 +498,7 @@
   }
 
   .introduce-container {
-    @apply fixed inset-0 z-[200] flex items-center justify-center overflow-hidden;
+    @apply fixed inset-0 z-[200] flex h-dvh items-center justify-center overflow-hidden p-4;
   }
 
   .modal-backdrop {
