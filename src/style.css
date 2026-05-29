@@ -1,22 +1,7 @@
 @import "tailwindcss";
 
-@font-face {
-  font-family: "Intel One Mono";
-  src: url("/fonts/IntelOneMono-VariableFont_wght.ttf") format("truetype");
-  font-weight: 300 700;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "Intel One Mono";
-  src: url("/fonts/IntelOneMono-Italic-VariableFont_wght.ttf") format("truetype");
-  font-weight: 300 700;
-  font-style: italic;
-  font-display: swap;
-}
-
 @theme {
+  --font-sans: "Intel One Mono", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", monospace;
   --font-mono: "Intel One Mono", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", monospace;
   --color-nav: #8b6e5b;
   --color-content: #e0d8cc;
@@ -35,9 +20,21 @@
     box-sizing: border-box;
   }
 
-  body {
+  html,
+  body,
+  #app {
     @apply m-0 bg-content font-mono text-[#333333];
     font-optical-sizing: auto;
+    font-synthesis: none;
+  }
+
+  *,
+  *::before,
+  *::after {
+    font-family: "Intel One Mono", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", monospace;
+    font-optical-sizing: auto;
+    font-synthesis: none;
+    font-style: normal !important;
   }
 
   button,
@@ -46,6 +43,21 @@
   select {
     @apply font-mono;
     font-optical-sizing: auto;
+    font-synthesis: none;
+    font-style: normal !important;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    font-family: "Intel One Mono", "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", monospace !important;
+    font-optical-sizing: auto;
+    font-synthesis: none;
+    font-style: normal !important;
+  }
+
+  i,
+  em {
+    font-style: normal !important;
   }
 
 }
@@ -225,7 +237,7 @@
   }
 
   .x-post-text {
-    @apply mt-1 whitespace-pre-wrap break-words text-[15px] italic leading-[1.8] text-[#8a8a8a];
+    @apply mt-1 whitespace-pre-wrap break-words text-[15px] leading-[1.8] text-[#8a8a8a];
   }
 
   .x-media-grid {
@@ -355,6 +367,7 @@
 
   .input-field {
     @apply flex-1 border-0 bg-transparent px-[15px] py-3 text-base outline-none max-md:text-sm;
+    font-style: normal !important;
   }
 
   .forgot-password {
@@ -395,6 +408,7 @@
 
   .reg-input {
     @apply flex-1 rounded-xl border border-[#cccccc] bg-white px-[15px] py-3 text-base outline-none max-md:w-full;
+    font-style: normal !important;
   }
 
   .reg-btn {
