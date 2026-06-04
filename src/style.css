@@ -76,11 +76,36 @@
   }
 
   .nav-actions {
-    @apply flex shrink-0 items-center justify-end gap-2.5 whitespace-nowrap max-md:gap-1.5;
+    @apply flex shrink-0 items-center justify-end gap-4 whitespace-nowrap max-md:gap-2.5;
   }
 
-  .nav-badge {
-    @apply flex h-8 min-w-14 cursor-pointer items-center justify-center rounded-[5px] border-0 bg-card px-2.5 text-sm font-bold text-brown transition-transform hover:scale-105 max-md:h-7 max-md:min-w-12 max-md:px-1.5 max-md:text-xs;
+  .top-nav-icon {
+    @apply flex size-11 shrink-0 cursor-pointer items-center justify-center rounded-full border border-[#d8cfc4] bg-[#fffaf4] text-brown shadow-[0_3px_10px_rgba(51,26,0,0.16)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_6px_16px_rgba(51,26,0,0.22)] max-md:size-9;
+  }
+
+  .top-nav-icon .material-symbols-outlined {
+    @apply leading-none;
+  }
+
+  .top-nav-profile .material-symbols-outlined {
+    @apply text-[31px];
+  }
+
+  .top-nav-search {
+    @apply text-brown;
+  }
+
+  .top-nav-search .material-symbols-outlined {
+    @apply text-[31px] text-brown;
+  }
+
+  .top-nav-notification .material-symbols-outlined {
+    @apply text-[31px];
+  }
+
+  .nav-time {
+    @apply flex h-9 shrink-0 cursor-pointer items-center justify-center border border-[#d8cfc4] bg-[#fffaf4] px-3 text-sm font-semibold text-brown shadow-[0_3px_10px_rgba(51,26,0,0.14)] transition-all duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-[0_6px_16px_rgba(51,26,0,0.2)] max-md:h-8 max-md:px-2;
+    font-variant-numeric: tabular-nums;
   }
 
   .side-menu {
@@ -153,7 +178,7 @@
   }
 
   .feed-content {
-    @apply mx-auto flex min-h-[calc(100vh-60px)] max-w-[1200px] flex-1 flex-col gap-10 bg-feed px-[10%] py-10 pb-20 max-md:w-full max-md:gap-5 max-md:p-5;
+    @apply mx-auto flex min-h-[calc(100vh-60px)] max-w-[1100px] flex-1 flex-col gap-8 bg-feed px-[7%] py-10 pb-20 max-md:w-full max-md:gap-5 max-md:p-5;
   }
 
   .grid-icons {
@@ -201,15 +226,29 @@
   }
 
   .x-post {
-    @apply mb-4 flex w-full items-start gap-5 bg-transparent px-2 py-2;
+    @apply mb-3 grid w-full grid-cols-[76px_minmax(0,1fr)] items-start gap-6 bg-transparent px-0 py-2 max-md:grid-cols-[48px_minmax(0,1fr)] max-md:gap-3;
+    animation: feedItemIn 520ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    user-select: none;
+  }
+
+  .x-post:nth-of-type(2) {
+    animation-delay: 60ms;
+  }
+
+  .x-post:nth-of-type(3) {
+    animation-delay: 120ms;
+  }
+
+  .x-post:nth-of-type(4) {
+    animation-delay: 180ms;
   }
 
   .x-post-avatar {
-    @apply mt-2 flex size-[70px] shrink-0 cursor-pointer items-center justify-center rounded-full border border-[#eaeaea] bg-white text-transparent shadow-[0_2px_10px_rgba(0,0,0,0.05)] transition-opacity hover:opacity-85;
+    @apply mt-1 flex size-[76px] shrink-0 cursor-pointer items-center justify-center rounded-full border border-[#eaeaea] bg-white text-transparent shadow-[0_2px_10px_rgba(0,0,0,0.05)] transition-all duration-300 hover:-translate-y-0.5 hover:scale-[1.03] hover:opacity-90 hover:shadow-[0_8px_22px_rgba(74,51,32,0.14)] max-md:size-12;
   }
 
   .x-post-main {
-    @apply min-w-0 flex-1 rounded-sm border border-[#e0e0e0] bg-white p-6 text-[#7a7a7a] shadow-[0_2px_8px_rgba(0,0,0,0.04)];
+    @apply min-w-0 rounded-sm border border-[#e0e0e0] bg-white p-6 text-[#7a7a7a] shadow-[0_2px_8px_rgba(0,0,0,0.04)] transition-all duration-300 hover:-translate-y-0.5 hover:border-[#d8cfc4] hover:shadow-[0_12px_28px_rgba(74,51,32,0.09)] max-md:p-4;
   }
 
   .x-post-header {
@@ -238,15 +277,19 @@
 
   .x-post-text {
     @apply mt-1 whitespace-pre-wrap break-words text-[15px] leading-[1.8] text-[#8a8a8a];
+    user-select: text;
   }
 
   .x-media-grid {
     @apply mt-3 grid w-full overflow-hidden rounded-[16px] border border-[#cfd9de] bg-[#eff3f4];
     aspect-ratio: 16 / 9;
+    user-select: none;
   }
 
   .x-media-grid-1 {
     @apply grid-cols-1;
+    aspect-ratio: auto;
+    max-height: min(520px, 80vh);
   }
 
   .x-media-grid-2 {
@@ -278,6 +321,52 @@
 
   .x-media-tile img {
     @apply h-full w-full object-cover transition-transform duration-200 hover:scale-[1.02];
+    -webkit-user-drag: none;
+    user-select: none;
+  }
+
+  .post-actions {
+    @apply mt-3 flex select-none items-center justify-between px-1.5 pt-3 text-muted;
+  }
+
+  .post-actions-left,
+  .post-actions-right {
+    @apply flex gap-[15px];
+  }
+
+  .post-action-icon {
+    @apply flex size-6 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent p-0 text-current transition-all duration-200 hover:-translate-y-0.5 hover:scale-110 hover:text-brown active:scale-95 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a98769];
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .post-action-icon svg {
+    @apply size-5;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    pointer-events: none;
+  }
+
+  .post-action-icon-liked {
+    @apply text-[#e74c3c];
+  }
+
+  .post-action-icon-liked svg,
+  .post-action-icon-bookmarked svg {
+    fill: currentColor;
+  }
+
+  .post-action-icon-bookmarked {
+    @apply text-brown;
+  }
+
+  .x-media-grid-1 .x-media-tile {
+    @apply flex items-center justify-center bg-white;
+  }
+
+  .x-media-grid-1 .x-media-tile img {
+    @apply h-auto w-full object-contain;
+    max-height: min(520px, 80vh);
   }
 
   .x-media-more {
@@ -337,12 +426,181 @@
     @apply absolute right-3 top-3 flex size-8 cursor-pointer items-center justify-center rounded-full border-0 bg-[#0f1419]/80 text-2xl leading-none text-white transition-colors hover:bg-[#0f1419];
   }
 
+  .compose-entry {
+    @apply cursor-pointer items-center gap-4 rounded border-[1.5px] border-border-soft bg-card p-4 text-left shadow-[0_4px_20px_rgba(0,0,0,0.05)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_8px_26px_rgba(0,0,0,0.08)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a98769] max-md:w-full max-md:flex-row;
+    animation: composeEntryIn 480ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    margin-left: 100px;
+    width: calc(100% - 100px);
+  }
+
+  .compose-entry:hover .compose-entry-avatar {
+    transform: rotate(6deg) scale(1.04);
+  }
+
+  @media (max-width: 768px) {
+    .compose-entry {
+      margin-left: 0;
+    }
+  }
+
+  .compose-entry-avatar {
+    @apply flex size-12 shrink-0 items-center justify-center rounded-full bg-brown text-white transition-transform duration-300;
+  }
+
+  .compose-entry-body {
+    @apply flex min-w-0 flex-1 items-center justify-between gap-4;
+  }
+
+  .compose-entry-placeholder {
+    @apply min-w-0 truncate text-lg text-[#8a7f76];
+  }
+
+  .compose-entry-button {
+    @apply shrink-0 rounded-full border border-[#d8cfc4] bg-[#fffaf4] px-5 py-2 text-sm font-bold text-brown;
+  }
+
+  .compose-modal-backdrop {
+    @apply fixed inset-0 z-[400] flex items-center justify-center bg-[#23170f]/70 px-5 py-6 backdrop-blur-[2px];
+    animation: modalBackdropIn 220ms ease-out both;
+  }
+
+  .compose-modal {
+    @apply flex w-full max-w-[760px] flex-col overflow-hidden rounded-[10px] border border-[#d8cfc4] bg-[#fffaf4] shadow-[0_24px_70px_rgba(51,26,0,0.28)];
+    animation: composeModalIn 320ms cubic-bezier(0.2, 0.9, 0.22, 1.12) both;
+    transform-origin: 50% 46%;
+  }
+
+  .compose-modal-header {
+    @apply grid min-h-[74px] grid-cols-[1fr_auto_1fr] items-center border-b border-[#d8cfc4] bg-white px-7;
+  }
+
+  .compose-modal-title-group {
+    @apply flex flex-col items-center gap-0.5;
+  }
+
+  .compose-modal-kicker {
+    @apply text-[11px] font-bold uppercase tracking-[0.18em] text-[#a98769];
+  }
+
+  .compose-modal-header h2 {
+    @apply text-xl font-bold text-brown;
+  }
+
+  .compose-modal-cancel {
+    @apply w-fit cursor-pointer rounded-full border border-transparent bg-transparent px-3 py-1.5 text-base font-bold text-[#7b7068] transition-all hover:border-[#d8cfc4] hover:bg-[#fffaf4] hover:text-brown active:scale-95;
+  }
+
+  .compose-modal-header-actions {
+    @apply flex justify-end gap-3;
+  }
+
+  .compose-modal-icon {
+    @apply flex size-10 cursor-pointer items-center justify-center rounded-full border border-[#d8cfc4] bg-[#fffaf4] text-2xl font-bold leading-none text-brown shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:bg-white hover:shadow-md active:scale-95;
+  }
+
+  .compose-modal-icon .material-symbols-outlined {
+    @apply text-[31px] leading-none;
+  }
+
+  .compose-modal-body {
+    @apply grid grid-cols-[56px_1fr] gap-5 px-7 pb-5 pt-6 max-md:grid-cols-[44px_1fr] max-md:px-5;
+  }
+
+  .compose-modal-avatar {
+    @apply flex size-14 items-center justify-center rounded-full bg-brown shadow-[0_8px_18px_rgba(74,51,32,0.18)] max-md:size-11;
+  }
+
+  .compose-modal-avatar span {
+    @apply block size-5 rotate-45 rounded-[3px] border-2 border-[#fffaf4] max-md:size-4;
+  }
+
+  .compose-modal-content {
+    @apply min-w-0;
+  }
+
+  .compose-modal-userline {
+    @apply mb-3 flex flex-wrap items-center gap-2 text-sm font-bold text-[#9b8f86];
+  }
+
+  .compose-modal-userline strong {
+    @apply text-base text-brown;
+  }
+
+  .compose-modal-userline span {
+    @apply rounded-full border border-[#d8cfc4] bg-white px-2.5 py-1 text-xs text-[#8a7f76];
+  }
+
+  .compose-visibility-toggle {
+    @apply inline-flex overflow-hidden rounded-full border border-[#d8cfc4] bg-white p-1 shadow-sm;
+  }
+
+  .compose-visibility-toggle button {
+    @apply cursor-pointer rounded-full border-0 bg-transparent px-3 py-1.5 text-xs font-bold text-[#8a7f76] transition-all duration-200 hover:text-brown active:scale-95;
+  }
+
+  .compose-visibility-toggle button.active {
+    @apply bg-brown text-white shadow-[0_3px_10px_rgba(74,51,32,0.2)];
+  }
+
+  .compose-modal-textarea {
+    @apply min-h-[150px] w-full resize-none rounded-[8px] border border-[#e2d8ce] bg-white px-4 py-3 text-base leading-7 text-[#3d332a] shadow-inner outline-none transition-all placeholder:text-[#b6ada5] focus:border-[#b99878] focus:bg-[#fffdf9] focus:shadow-[inset_0_0_0_1px_rgba(185,152,120,0.35)];
+  }
+
+  .compose-modal-media {
+    @apply mt-4 max-w-none;
+  }
+
+  .compose-modal-tools {
+    @apply mt-4 flex items-center gap-2 rounded-[8px] border border-[#e2d8ce] bg-white p-2 text-[#9a9a9a];
+  }
+
+  .compose-modal-tools button {
+    @apply flex h-10 min-w-10 cursor-pointer items-center justify-center rounded-md border-0 bg-transparent p-0 text-[#8f857d] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#f4efea] hover:text-brown active:scale-95;
+  }
+
+  .compose-modal-tools .material-symbols-outlined {
+    @apply text-[25px] leading-none;
+  }
+
+  .compose-modal-tools button span:not(.material-symbols-outlined) {
+    @apply rounded border border-current px-1.5 py-0.5 text-[10px] font-black;
+  }
+
+  .compose-modal-thread-hint {
+    @apply mt-5 flex items-center gap-4 text-[#c6c0ba];
+  }
+
+  .compose-modal-thread-hint span {
+    @apply size-5 shrink-0 rounded-full bg-[radial-gradient(circle,#ddd4ca_0_45%,transparent_46%)];
+  }
+
+  .compose-modal-thread-hint button {
+    @apply cursor-pointer border-0 bg-transparent p-0 text-base text-[#c6c0ba] hover:text-brown;
+  }
+
+  .compose-modal-error {
+    @apply px-7 pb-2 text-sm font-bold text-[#cc3333] max-md:px-5;
+  }
+
+  .compose-modal-footer {
+    @apply flex items-center justify-between border-t border-[#d8cfc4] bg-white px-7 py-5 max-md:px-5;
+  }
+
+  .compose-modal-options {
+    @apply cursor-pointer rounded-full border border-transparent bg-transparent px-3 py-2 text-sm font-bold text-[#8f8a85] transition-all hover:border-[#d8cfc4] hover:bg-[#fffaf4] hover:text-brown;
+  }
+
+  .compose-modal-submit {
+    @apply cursor-pointer rounded-[8px] border border-brown bg-brown px-7 py-3 text-base font-bold text-white shadow-[0_6px_16px_rgba(74,51,32,0.18)] transition-all hover:-translate-y-0.5 hover:bg-brown-dark hover:shadow-[0_10px_24px_rgba(74,51,32,0.24)] disabled:cursor-not-allowed disabled:border-[#e2d8ce] disabled:bg-[#f4efea] disabled:text-[#c4b8af] disabled:shadow-none disabled:hover:translate-y-0;
+  }
+
   .profile-btn {
     @apply flex-1 cursor-pointer rounded bg-[#dcd6cd] p-[15px] text-center text-base tracking-[1px] text-brown shadow-[0_4px_10px_rgba(0,0,0,0.05)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-[#c5bfb5] hover:shadow-[0_6px_15px_rgba(0,0,0,0.1)];
   }
 
   .fab {
     @apply fixed bottom-10 right-10 z-[100] flex size-20 cursor-pointer items-center justify-center rounded-full bg-brown text-[0] text-white shadow-[0_4px_15px_rgba(0,0,0,0.2)] transition-all duration-300 after:text-[40px] after:content-['+'] after:font-sans after:font-normal hover:scale-110 hover:rotate-90 hover:bg-brown-dark max-md:bottom-5 max-md:right-5 max-md:size-[60px] max-md:after:text-3xl;
+    animation: fabFloat 2.8s ease-in-out infinite;
   }
 
   .auth-container {
@@ -504,7 +762,8 @@
   }
 
   .stat-item {
-    @apply flex flex-1 cursor-pointer items-center justify-center rounded-lg bg-[#d5d5d5] text-lg text-[#333333] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#c5c5c5] max-md:h-[60px] max-md:text-base;
+    @apply flex flex-1 cursor-pointer items-center justify-center rounded-lg border-0 bg-[#d5d5d5] text-lg text-[#333333] transition-all duration-200 hover:-translate-y-0.5 hover:bg-[#c5c5c5] disabled:cursor-not-allowed disabled:opacity-70 max-md:h-[60px] max-md:text-base;
+    font: inherit;
   }
 
   .stat-item.logout {
@@ -614,6 +873,86 @@
     100% {
       opacity: 1;
       transform: scale(1) translateY(0);
+    }
+  }
+
+  @keyframes feedItemIn {
+    0% {
+      opacity: 0;
+      transform: translateY(18px) scale(0.985);
+      filter: blur(3px);
+    }
+
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+    }
+  }
+
+  @keyframes composeEntryIn {
+    0% {
+      opacity: 0;
+      transform: translateY(-10px) scale(0.985);
+      filter: blur(3px);
+    }
+
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+    }
+  }
+
+  @keyframes modalBackdropIn {
+    0% {
+      opacity: 0;
+    }
+
+    100% {
+      opacity: 1;
+    }
+  }
+
+  @keyframes composeModalIn {
+    0% {
+      opacity: 0;
+      transform: translateY(24px) scale(0.96);
+      filter: blur(5px);
+    }
+
+    65% {
+      opacity: 1;
+      transform: translateY(-3px) scale(1.006);
+      filter: blur(0);
+    }
+
+    100% {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+      filter: blur(0);
+    }
+  }
+
+  @keyframes fabFloat {
+    0%,
+    100% {
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    50% {
+      box-shadow: 0 10px 24px rgba(74, 51, 32, 0.28);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
     }
   }
 }

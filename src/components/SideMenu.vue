@@ -75,18 +75,9 @@ function isActive(paths: string[]) {
           <path d="m16.5 16.5 4 4" />
         </svg>
 
-        <svg
-          v-else-if="item.icon === 'compass'"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.1"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <circle cx="12" cy="12" r="9" />
-          <path d="m15.4 8.6-2.1 5.1-4.7 1.7 2.1-5.1z" />
-        </svg>
+        <span v-else-if="item.icon === 'compass'" class="material-symbols-outlined">
+          explore
+        </span>
 
         <span v-else-if="item.icon === 'notifications'" class="material-symbols-outlined">
           notifications

@@ -1,28 +1,75 @@
 <script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import SideMenu from './SideMenu.vue'
 
 const router = useRouter()
+const now = ref(new Date())
+let clockTimer: number | undefined
+
+const currentTime = computed(() =>
+  new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(now.value),
+)
+
+onMounted(() => {
+  clockTimer = window.setInterval(() => {
+    now.value = new Date()
+  }, 1_000)
+})
+
+onBeforeUnmount(() => {
+  if (clockTimer !== undefined) {
+    window.clearInterval(clockTimer)
+  }
+})
 </script>
 
 <template>
   <div class="navbar">
     <div class="nav-logo" @click="router.push('/home')"></div>
+
     <div class="nav-actions">
-      <SideMenu class="side-menu-bar" compact />
-      <button 
-        type="button" 
-        class="flex size-10 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-white transition-colors hover:bg-brown-dark max-md:size-8" 
+      <button
+        type="button"
+        class="top-nav-icon top-nav-profile"
+        aria-label="個人"
+        title="個人"
         @click="router.push('/personal')"
-        title="個人資料"
       >
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="size-[26px]">
-          <circle cx="12" cy="12" r="10"></circle>
-          <circle cx="12" cy="9" r="3.5"></circle>
-          <path d="M6.5 19.5v-1a4 4 0 0 1 4-4h3a4 4 0 0 1 4 4v1"></path>
-        </svg>
+        <span class="material-symbols-outlined" aria-hidden="true">account_circle</span>
       </button>
-      <button type="button" class="nav-badge" @click="router.push('/freq')">999+</button>
+
+      <button
+        type="button"
+        class="top-nav-icon top-nav-search"
+        aria-label="探索"
+        title="探索"
+        @click="router.push('/explore')"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">explore</span>
+      </button>
+
+      <button
+        type="button"
+        class="top-nav-icon top-nav-notification"
+        aria-label="通知"
+        title="通知"
+      >
+        <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
+      </button>
+
+      <button
+        type="button"
+        class="nav-time"
+        aria-label="現在時間"
+        title="現在時間"
+        @click="router.push('/freq')"
+      >
+        {{ currentTime }}
+      </button>
     </div>
   </div>
 </template>

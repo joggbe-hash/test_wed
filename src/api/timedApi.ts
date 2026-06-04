@@ -1,6 +1,6 @@
-export interface ApiResponse<T> {
+﻿export interface ApiResponse<T> {
   data: T
-  returnedAt: Date
+  returnedAt: string
   delayMs: number
 }
 
@@ -9,7 +9,7 @@ export function requestByTime<T>(data: T, delayMs = 1200): Promise<ApiResponse<T
     window.setTimeout(() => {
       resolve({
         data,
-        returnedAt: new Date(),
+        returnedAt: new Date().toISOString(),
         delayMs,
       })
     }, delayMs)
@@ -24,8 +24,8 @@ export interface HomeFeedData {
 export function fetchHomeFeed(): Promise<ApiResponse<HomeFeedData>> {
   return requestByTime<HomeFeedData>(
     {
-      posts: ['個人內容', '發佈內容'],
-      shareText: '(打字框)',
+      posts: ['?犖?批捆', '?潔??批捆'],
+      shareText: '(??獢?',
     },
     1200,
   )
@@ -95,7 +95,7 @@ export function fetchPersonalData(): Promise<ApiResponse<PersonalData>> {
         bio: '個人簡介',
       },
       posts: ['私人貼文', '公開貼文'],
-      timer: '02:00:58',
+      timer: new Date().toISOString(),
     },
     900,
   )
@@ -107,10 +107,12 @@ export interface FreqData {
 }
 
 export function fetchFreqData(): Promise<ApiResponse<FreqData>> {
+  const now = new Date().toISOString()
+
   return requestByTime<FreqData>(
     {
-      timeCards: ['時間', '時間', '時間'],
-      stats: ['使用者資料', '互動數據', '收藏紀錄', '設定項目'],
+      timeCards: [now, now, now],
+      stats: ['使用者資料', '搜尋紀錄', '通知列表', '設定項目'],
     },
     800,
   )
@@ -132,7 +134,7 @@ export interface SocialData {
 export function fetchSocialData(): Promise<ApiResponse<SocialData>> {
   return requestByTime<SocialData>(
     {
-      composerText: '輸入內容',
+      composerText: '輸入貼文',
       posts: Array.from({ length: 8 }, (_, index) => ({
         id: index + 1,
         type: index % 2 === 0 ? 'text' : 'image',

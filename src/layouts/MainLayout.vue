@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import AppNavbar from '../components/AppNavbar.vue'
+import { openComposeModal } from '../composables/useComposeModal'
 
 defineProps<{
   activeNav?: string
@@ -21,6 +22,6 @@ defineProps<{
         <slot />
       </div>
     </div>
-    <div class="fab"></div>
+    <button type="button" class="fab" aria-label="新增貼文" @click="openComposeModal"></button>
   </div>
 </template>

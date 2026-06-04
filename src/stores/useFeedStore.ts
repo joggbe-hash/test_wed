@@ -31,6 +31,12 @@ export const useFeedStore = defineStore('feed', () => {
     posts.value = posts.value.filter((post) => post.id !== postId)
   }
 
+  function reset() {
+    posts.value = []
+    isLoaded.value = false
+    isLoading.value = false
+  }
+
   return {
     posts,
     isLoaded,
@@ -38,5 +44,6 @@ export const useFeedStore = defineStore('feed', () => {
     loadPosts,
     prependPost,
     removePost,
+    reset,
   }
 })
