@@ -106,7 +106,6 @@ onBeforeUnmount(() => {
       <header class="compose-modal-header">
         <button type="button" class="compose-modal-cancel" @click="closeModal">取消</button>
         <div class="compose-modal-title-group">
-          <span class="compose-modal-kicker">Type WSP</span>
           <h2 id="compose-title">建立貼文</h2>
         </div>
         <div class="compose-modal-header-actions">

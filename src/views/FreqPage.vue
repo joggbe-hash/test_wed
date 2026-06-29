@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import MainLayout from '../layouts/MainLayout.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
@@ -16,6 +16,8 @@ const errorMessage = ref('')
 const timeCards = ref<string[]>([])
 const stats = ref<string[]>([])
 
+const formattedTimeCards = computed(() => timeCards.value.map(() => '時間'))
+
 function resetScreenState() {
   timeCards.value = []
   stats.value = []
@@ -25,9 +27,7 @@ function resetScreenState() {
 }
 
 async function handleLogout() {
-  if (isLoggingOut.value) {
-    return
-  }
+  if (isLoggingOut.value) return
 
   isLoggingOut.value = true
   errorMessage.value = ''
@@ -66,22 +66,32 @@ onMounted(async () => {
     feed-class="freq-feed"
   >
     <template #sidebar>
-      <div v-for="card in timeCards" :key="card" class="time-card">{{ card }}</div>
+      <div v-for="(card, index) in formattedTimeCards" :key="`${card}-${index}`" class="time-card">
+        {{ card }}
+      </div>
     </template>
 
     <LoadingPanel v-if="isLoading" />
 
     <template v-else>
-      <div v-for="item in stats" :key="item" class="stat-item">{{ item }}</div>
-      <div v-if="errorMessage" class="stat-item">{{ errorMessage }}</div>
-      <button
-        type="button"
-        class="stat-item logout"
-        :disabled="isLoggingOut"
-        @click="handleLogout"
-      >
-        {{ isLoggingOut ? '登出中...' : '登出' }}
-      </button>
+      <div class="freq-action-rail">
+        <button v-for="item in stats" :key="item" type="button" class="stat-item">
+          {{ item }}
+        </button>
+
+        <div v-if="errorMessage" class="stat-item stat-item-error">
+          {{ errorMessage }}
+        </div>
+
+        <button
+          type="button"
+          class="stat-item logout"
+          :disabled="isLoggingOut"
+          @click="handleLogout"
+        >
+          {{ isLoggingOut ? '登出中...' : '登出' }}
+        </button>
+      </div>
     </template>
   </MainLayout>
 </template>

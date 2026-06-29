@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
-const now = ref(new Date())
+const now = shallowRef(new Date())
+const navSearchText = shallowRef('')
 let clockTimer: number | undefined
 
 const currentTime = computed(() =>
@@ -13,6 +14,11 @@ const currentTime = computed(() =>
     hour12: true,
   }).format(now.value),
 )
+
+function submitNavSearch() {
+  const query = navSearchText.value.trim()
+  router.push(query ? { path: '/explore', query: { q: query } } : '/explore')
+}
 
 onMounted(() => {
   clockTimer = window.setInterval(() => {
@@ -30,6 +36,20 @@ onBeforeUnmount(() => {
 <template>
   <div class="navbar">
     <div class="nav-logo" @click="router.push('/home')"></div>
+
+    <form class="nav-search-form" role="search" @submit.prevent="submitNavSearch">
+      <svg class="nav-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <circle cx="11" cy="11" r="7.5"></circle>
+        <line x1="16.5" y1="16.5" x2="21" y2="21"></line>
+      </svg>
+      <input
+        v-model="navSearchText"
+        type="search"
+        class="nav-search-input"
+        aria-label="搜尋"
+        autocomplete="off"
+      >
+    </form>
 
     <div class="nav-actions">
       <button

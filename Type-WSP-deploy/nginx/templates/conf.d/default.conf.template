@@ -140,6 +140,8 @@ server {
     location / {
         root /usr/share/nginx/html;
         try_files ${DOLLAR}uri ${DOLLAR}uri/ /index.html;
+        add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+        add_header Pragma "no-cache" always;
 
         # 靜態資源快取 30 天
         location ~* \.(?:css|js|woff2?|ttf|eot|otf|svg|png|jpg|jpeg|gif|webp|ico)$ {

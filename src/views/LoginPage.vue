@@ -6,6 +6,7 @@ import {
   registerAccount,
   sendVerificationCode,
 } from '../api/backendApi'
+import { publicAsset } from '../utils/assets'
 
 const router = useRouter()
 const mode = ref<'login' | 'register'>('login')
@@ -17,6 +18,12 @@ const confirmPassword = ref('')
 const isSubmitting = ref(false)
 const statusMessage = ref('')
 const errorMessage = ref('')
+const authBackgroundStyle = {
+  '--auth-background-image': `url("${publicAsset('picture/meme_background.jpg')}")`,
+}
+const registerBackgroundStyle = {
+  '--register-background-image': `url("${publicAsset('picture/register_round.jpg')}")`,
+}
 
 const canRegister = computed(() => password.value !== '' && password.value === confirmPassword.value)
 
@@ -84,7 +91,7 @@ async function handleRegister() {
 </script>
 
 <template>
-  <div class="auth-container">
+  <div class="auth-container" :style="authBackgroundStyle">
     <div
       id="slider"
       class="form-slider"
@@ -117,7 +124,12 @@ async function handleRegister() {
         </div>
       </form>
 
-      <form id="registerForm" class="form-section register-form-section" @submit.prevent="handleRegister">
+      <form
+        id="registerForm"
+        class="form-section register-form-section"
+        :style="registerBackgroundStyle"
+        @submit.prevent="handleRegister"
+      >
         <div class="reg-group">
           <div class="reg-label">電子信箱</div>
           <input v-model="email" type="email" class="reg-input" placeholder="example@email.com" autocomplete="email">

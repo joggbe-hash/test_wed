@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { publicAsset } from '../utils/assets'
 
 const props = defineProps<{
   compact?: boolean
@@ -10,10 +11,10 @@ const route = useRoute()
 const router = useRouter()
 
 const items = [
-  { label: '首頁', icon: 'home', iconSrc: '/icons/home.png', to: '/home', activePaths: ['/home'] },
-  { label: '聊天', icon: 'chat', iconSrc: '/icons/chat.png', to: '/social', activePaths: [] },
-  { label: '搜尋', icon: 'search', iconSrc: '/icons/search.png', to: '/explore', activePaths: [] },
-  { label: '探索', icon: 'compass', iconSrc: '/icons/explore.png', to: '/explore', activePaths: ['/explore'] },
+  { label: '首頁', icon: 'home', iconSrc: publicAsset('icons/home.png'), to: '/home', activePaths: ['/home'] },
+  { label: '聊天', icon: 'chat', iconSrc: publicAsset('icons/chat.png'), to: '/social', activePaths: [] },
+  { label: '搜尋', icon: 'search', iconSrc: publicAsset('icons/search.png'), to: '/explore', activePaths: [] },
+  { label: '探索', icon: 'compass', iconSrc: publicAsset('icons/explore.png'), to: '/explore', activePaths: ['/explore'] },
   { label: '通知', icon: 'notifications', iconSrc: '', to: '/freq', activePaths: ['/freq'] },
   { label: '個人資料', icon: 'profile', iconSrc: '', to: '/personal', activePaths: ['/personal'] },
 ]

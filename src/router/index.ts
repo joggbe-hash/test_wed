@@ -6,6 +6,8 @@ import PersonalPage from '../views/PersonalPage.vue'
 import FreqPage from '../views/FreqPage.vue'
 import IntroducePage from '../views/IntroducePage.vue'
 import SocialPage from '../views/SocialPage.vue'
+import TodayTasksPage from '../views/TodayTasksPage.vue'
+import TodayRemindersPage from '../views/TodayRemindersPage.vue'
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -14,6 +16,8 @@ const routes = [
   { path: '/explore', component: ExplorePage },
   { path: '/personal', component: PersonalPage },
   { path: '/freq', component: FreqPage },
+  { path: '/tasks/today', component: TodayTasksPage },
+  { path: '/reminders/today', component: TodayRemindersPage },
   { path: '/introduce', component: IntroducePage },
   { path: '/social', component: SocialPage },
 ]

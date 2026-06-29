@@ -4,10 +4,11 @@ import MainLayout from '../layouts/MainLayout.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import { deletePost } from '../api/backendApi'
 import XPostCard from '../components/XPostCard.vue'
+import SidebarWidgets from '../components/SidebarWidgets.vue'
 import { useFeedStore } from '../stores/useFeedStore'
 
-const feedStore = useFeedStore() // 引入 Pinia store 來讀取快取的貼文
-const openPostMenuId = ref<number | null>(null) // 紀錄目前開啟的設定選單 ID
+const feedStore = useFeedStore() // 引入 Pinia 狀態庫來讀取快取的貼文
+const openPostMenuId = ref<number | null>(null) // 紀錄目前開啟的設定選單編號
 const imageViewer = ref<{ urls: string[], index: number } | null>(null) // 控制全螢幕圖片檢視器的狀態
 
 // 打開圖片檢視器
@@ -37,7 +38,7 @@ function showNextViewerImage() {
 async function handleDeletePost(postId: number) {
   try {
     await deletePost(postId)
-    feedStore.removePost(postId) // 透過 Pinia 移除該貼文
+    feedStore.removePost(postId) // 透過 Pinia 狀態庫移除該貼文
     openPostMenuId.value = null
   } catch (error) {
     console.error(error)
@@ -54,6 +55,11 @@ onMounted(async () => {
 
 <template>
   <MainLayout active-nav="personal">
+    <!-- 個人頁也套用第二版左側工具欄，讓個人頁路由和首頁、社群頁的版面一致。 -->
+    <template #sidebar>
+      <SidebarWidgets />
+    </template>
+
     <LoadingPanel v-if="feedStore.isLoading" />
     <template v-else>
       <XPostCard

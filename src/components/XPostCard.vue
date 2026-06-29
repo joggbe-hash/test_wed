@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { BackendPost } from '../api/backendApi'
+import { publicAsset } from '../utils/assets'
 import PostActions from './PostActions.vue'
 
 const props = defineProps<{
@@ -17,6 +18,8 @@ const emit = defineEmits<{
 function visibleImages(post: BackendPost) {
   return post.image_urls?.slice(0, 4) ?? []
 }
+
+const settingsIconUrl = publicAsset('icons/settings.png')
 </script>
 
 <template>
@@ -41,7 +44,7 @@ function visibleImages(post: BackendPost) {
             aria-label="貼文設定"
             @click.stop="emit('toggleMenu', props.post.id)"
           >
-            <img src="/icons/settings.png" alt="" class="size-5 opacity-70">
+            <img :src="settingsIconUrl" alt="" class="size-5 opacity-70">
           </button>
           <div v-if="props.isMenuOpen" class="x-post-menu">
             <button type="button" class="x-post-delete" @click.stop="emit('deletePost', props.post.id)">

@@ -1,22 +1,57 @@
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import MainLayout from '../layouts/MainLayout.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import { fetchExploreData } from '../api/timedApi'
 import type { ExploreCategory, ExploreRow } from '../api/timedApi'
 
+const route = useRoute()
 const router = useRouter()
 const cleanupHandlers: Array<() => void> = []
-const isLoading = ref(true)
-const searchText = ref('')
+const isLoading = shallowRef(true)
+const searchText = shallowRef('')
 const categories = ref<ExploreCategory[]>([])
 const rows = ref<ExploreRow[]>([])
+const normalizedSearchText = computed(() => searchText.value.trim().toLowerCase())
+
+const filteredCategories = computed(() => {
+  const query = normalizedSearchText.value
+  if (!query) return categories.value
+
+  return categories.value.filter((category) => category.name.toLowerCase().includes(query))
+})
+
+function matchesExploreCard(card: ExploreRow['cards'][number], query: string) {
+  return [
+    card.title,
+    card.tags,
+    card.description,
+    card.members,
+  ].some((value) => value.toLowerCase().includes(query))
+}
+
+const filteredRows = computed(() => {
+  const query = normalizedSearchText.value
+  if (!query) return rows.value
+
+  return rows.value
+    .map((row) => ({
+      ...row,
+      cards: row.cards.filter((card) => matchesExploreCard(card, query)),
+    }))
+    .filter((row) => row.cards.length > 0)
+})
+
+function queryToText(query: unknown) {
+  return typeof query === 'string' ? query : ''
+}
 
 function bindHorizontalScrollers() {
   cleanupHandlers.splice(0).forEach((cleanup) => cleanup())
 
-  document.querySelectorAll('.horizontal-scroller').forEach((el) => { const slider = el as HTMLElement;
+  document.querySelectorAll('.horizontal-scroller').forEach((el) => {
+    const slider = el as HTMLElement
     let isDown = false
     let startX = 0
     let scrollLeft = 0
@@ -30,10 +65,9 @@ function bindHorizontalScrollers() {
     }
 
     const onMouseUp = () => {
-      if (isDown) {
-        isDown = false
-        slider.style.cursor = 'grab'
-      }
+      if (!isDown) return
+      isDown = false
+      slider.style.cursor = 'grab'
     }
 
     const onMouseMove = (event: MouseEvent) => {
@@ -63,6 +97,7 @@ function bindHorizontalScrollers() {
 }
 
 onMounted(async () => {
+  searchText.value = queryToText(route.query.q)
   isLoading.value = true
   const response = await fetchExploreData()
   categories.value = response.data.categories
@@ -75,10 +110,22 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   cleanupHandlers.splice(0).forEach((cleanup) => cleanup())
 })
+
+watch(
+  () => route.query.q,
+  (query) => {
+    searchText.value = queryToText(query)
+  },
+)
+
+watch(filteredRows, async () => {
+  await nextTick()
+  bindHorizontalScrollers()
+})
 </script>
 
 <template>
-  <MainLayout active-nav="explore" feed-class="explore-feed">
+  <MainLayout active-nav="explore" sidebar-class="explore-sidebar" feed-class="explore-feed">
     <template #sidebar>
       <div class="sidebar-search">
         <svg class="sidebar-search-icon" viewBox="0 0 24 24" fill="none" stroke="#7A7A7A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
@@ -90,11 +137,11 @@ onBeforeUnmount(() => {
           aria-label="清除搜尋"
           @click="searchText = ''"
         >
-          <span class="material-symbols-outlined">cancel</span>
+          <span aria-hidden="true">×</span>
         </button>
       </div>
       <div class="grid-icons gap-x-[15px]">
-        <div v-for="item in categories" :key="item.id" class="grid-item">
+        <div v-for="item in filteredCategories" :key="item.id" class="grid-item">
           <div class="grid-icon-circle"></div>
           <div class="mt-[5px] text-sm text-[#333333]">{{ item.name }}</div>
         </div>
@@ -104,7 +151,7 @@ onBeforeUnmount(() => {
     <LoadingPanel v-if="isLoading" />
 
     <template v-else>
-      <div v-for="row in rows" :key="row.id" class="horizontal-scroller" :class="row.id === 1 ? 'mt-0' : 'mt-5'">
+      <div v-for="row in filteredRows" :key="row.id" class="horizontal-scroller" :class="row.id === 1 ? 'mt-0' : 'mt-5'">
         <div v-for="card in row.cards" :key="card.id" class="explore-card">
           <div class="explore-header">
             <div class="explore-avatar" @click="router.push('/personal')"></div>

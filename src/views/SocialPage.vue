@@ -5,8 +5,8 @@ import { deletePost } from '../api/backendApi'
 import MainLayout from '../layouts/MainLayout.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import XPostCard from '../components/XPostCard.vue'
+import SidebarWidgets from '../components/SidebarWidgets.vue'
 import { openComposeModal } from '../composables/useComposeModal'
-import { showIntroduceModal } from '../composables/useModal'
 import { useFeedStore } from '../stores/useFeedStore'
 
 const router = useRouter()
@@ -61,12 +61,7 @@ onMounted(async () => {
 <template>
   <MainLayout active-nav="social">
     <template #sidebar>
-      <div class="sidebar-card"></div>
-      <div class="sidebar-card"></div>
-      <div class="sidebar-card"></div>
-      <div class="grid-icons">
-        <div v-for="item in 16" :key="item" class="grid-icon-circle" @click="showIntroduceModal = true"></div>
-      </div>
+      <SidebarWidgets />
     </template>
 
     <LoadingPanel v-if="feedStore.isLoading" />
