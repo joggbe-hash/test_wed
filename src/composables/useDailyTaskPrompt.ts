@@ -1,7 +1,7 @@
 import { shallowRef } from 'vue'
 import { getLocalTodayKey } from '../utils/date'
 
-const IGNORED_PATHS = new Set(['/login'])
+const IGNORED_PATHS = new Set(['/login', '/forgot-password'])
 
 export const showDailyTaskPrompt = shallowRef(false)
 

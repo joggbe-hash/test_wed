@@ -71,7 +71,7 @@ server {
 
     # --- 連線與上傳限制 ---
     limit_conn perip 50;           # 每 IP 最多 50 個同時連線
-    client_max_body_size 100m;     # 上傳檔案上限 100MB
+    client_max_body_size 40m;      # 上傳檔案上限 40MB，API 仍會做單檔與檔案數檢查
     client_body_timeout  60s;
     client_header_timeout 10s;
 

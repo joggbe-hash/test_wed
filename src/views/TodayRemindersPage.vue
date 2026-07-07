@@ -1,20 +1,24 @@
 <script setup lang="ts">
-import { reactive } from 'vue'
+import { reactive, watch } from 'vue'
 import MainLayout from '../layouts/MainLayout.vue'
 import SidebarWidgets from '../components/SidebarWidgets.vue'
 import DateSelect from '../components/DateSelect.vue'
 import TimeSelect from '../components/TimeSelect.vue'
 import { useScheduleMock } from '../composables/useScheduleMock'
-import { getLocalTodayKey } from '../utils/date'
 
-const today = getLocalTodayKey()
-const { sortedReminders, addReminder } = useScheduleMock()
+const { todayKey, todayReminders, addReminder } = useScheduleMock()
 
 const reminderForm = reactive({
   title: '',
-  date: today,
+  date: todayKey.value,
   time: '10:00',
   note: '',
+})
+
+watch(todayKey, (nextDate, previousDate) => {
+  if (reminderForm.date === previousDate) {
+    reminderForm.date = nextDate
+  }
 })
 
 // 純前端建立流程：新增到模擬狀態後重設表單，不會呼叫後端介面。
@@ -46,7 +50,7 @@ function submitReminder() {
           <h1>今日提醒</h1>
         </div>
         <div class="schedule-summary">
-          <span>{{ sortedReminders.length }} 則提醒</span>
+          <span>{{ todayReminders.length }} 則提醒</span>
         </div>
       </header>
 
@@ -68,7 +72,7 @@ function submitReminder() {
       </form>
 
       <div class="reminder-list">
-        <article v-for="reminder in sortedReminders" :key="reminder.id" class="reminder-item">
+        <article v-for="reminder in todayReminders" :key="reminder.id" class="reminder-item">
           <div class="reminder-time">
             <strong>{{ reminder.time }}</strong>
             <span>{{ reminder.date }}</span>

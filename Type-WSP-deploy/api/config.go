@@ -1,6 +1,9 @@
 package main
 
-import "os"
+import (
+	"log"
+	"os"
+)
 
 // Config 集中管理 API 需要的環境變數；Docker Compose 會覆蓋這裡的開發預設值。
 type Config struct {
@@ -40,7 +43,7 @@ func LoadConfig() *Config {
 		MinioAccessKey:   envOr("MINIO_ACCESS_KEY", "minio_admin"),
 		MinioSecretKey:   envOr("MINIO_SECRET_KEY", "change_me"),
 		MinioBucket:      envOr("MINIO_BUCKET", "uploads"),
-		SecretKey:        envOr("SECRET_KEY", "dev-secret-change-in-production"),
+		SecretKey:        requiredEnv("SECRET_KEY"),
 		SessionTTL:       86400,
 	}
 }
@@ -50,4 +53,12 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func requiredEnv(key string) string {
+	v := os.Getenv(key)
+	if v == "" {
+		log.Fatalf("%s is required", key)
+	}
+	return v
 }

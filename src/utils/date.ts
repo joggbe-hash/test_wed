@@ -6,6 +6,11 @@ export function formatLocalDateKey(date: Date) {
   return `${year}-${month}-${day}`
 }
 
-export function getLocalTodayKey() {
-  return formatLocalDateKey(new Date())
+const scheduleDayStartHour = 4
+
+export function getLocalTodayKey(date = new Date()) {
+  const scheduleDate = new Date(date)
+  scheduleDate.setHours(scheduleDate.getHours() - scheduleDayStartHour)
+
+  return formatLocalDateKey(scheduleDate)
 }

@@ -4,14 +4,39 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
 
 // upgrader 把 HTTP 連線升級成 WebSocket；第一版先放寬 origin，正式版應改成白名單。
 var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool { return true },
+	CheckOrigin: sameOrigin,
+}
+
+func sameOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Host == "" {
+		return false
+	}
+
+	return normalizedHost(originURL.Host) == normalizedHost(r.Host)
+}
+
+func normalizedHost(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		return h
+	}
+	return host
 }
 
 // handleWebSocket 驗證 session 後訂閱該使用者的 Redis channel。

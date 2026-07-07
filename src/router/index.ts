@@ -1,5 +1,6 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import LoginPage from '../views/LoginPage.vue'
+import ForgotPasswordPage from '../views/ForgotPasswordPage.vue'
 import FirstPage from '../views/FirstPage.vue'
 import ExplorePage from '../views/ExplorePage.vue'
 import PersonalPage from '../views/PersonalPage.vue'
@@ -12,6 +13,7 @@ import TodayRemindersPage from '../views/TodayRemindersPage.vue'
 const routes = [
   { path: '/', redirect: '/login' },
   { path: '/login', component: LoginPage },
+  { path: '/forgot-password', component: ForgotPasswordPage },
   { path: '/home', component: FirstPage },
   { path: '/explore', component: ExplorePage },
   { path: '/personal', component: PersonalPage },

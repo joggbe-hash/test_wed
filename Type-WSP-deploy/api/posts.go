@@ -3,10 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
-	"mime"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -29,8 +29,14 @@ type Post struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-const feedCacheKey = "feed:latest"
-const feedCacheTTL = 30 * time.Second
+const (
+	feedCacheKey       = "feed:latest"
+	feedCacheTTL       = 30 * time.Second
+	maxPostBodyBytes   = 40 << 20
+	maxMultipartMemory = 8 << 20
+	maxImageUploadSize = 8 << 20
+	maxImagesPerPost   = 4
+)
 
 // handleFeed 讀取最新 20 筆貼文。第一頁使用 Redis 快取，cursor 分頁直接查 DB。
 func handleFeed(w http.ResponseWriter, r *http.Request) {
@@ -107,12 +113,21 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 	user := currentUser(r)
 	ctx := r.Context()
+	r.Body = http.MaxBytesReader(w, r.Body, maxPostBodyBytes)
 
-	if err := r.ParseMultipartForm(100 << 20); err != nil {
+	if !isMultipartRequest(r) {
 		var body struct {
 			Content string `json:"content"`
 		}
-		if err := readJSON(r, &body); err != nil || body.Content == "" {
+		if err := readJSON(r, &body); err != nil {
+			if isMaxBytesError(err) {
+				writeJSON(w, http.StatusRequestEntityTooLarge, M{"error": "post body is too large"})
+				return
+			}
+			writeJSON(w, http.StatusBadRequest, M{"error": "invalid JSON body"})
+			return
+		}
+		if body.Content == "" {
 			writeJSON(w, http.StatusBadRequest, M{"error": "content is required"})
 			return
 		}
@@ -120,24 +135,17 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content := r.FormValue("content")
-
-	var files []*fileEntry
-	if r.MultipartForm != nil && r.MultipartForm.File != nil {
-		for _, fh := range r.MultipartForm.File["images"] {
-			f, err := fh.Open()
-			if err != nil {
-				continue
-			}
-			contentType, extension := imageFileInfo(fh.Header.Get("Content-Type"), fh.Filename)
-			files = append(files, &fileEntry{
-				reader:      f,
-				size:        fh.Size,
-				contentType: contentType,
-				extension:   extension,
-			})
-		}
+	files, uploadErr := parseImageFiles(r)
+	if uploadErr != nil {
+		writeJSON(w, uploadErr.status, M{"error": uploadErr.message})
+		return
 	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	defer closeFileEntries(files)
+
+	content := r.FormValue("content")
 
 	if len(files) == 0 {
 		if content == "" {
@@ -147,11 +155,6 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		createTextPost(ctx, w, user, content)
 		return
 	}
-	defer func() {
-		for _, f := range files {
-			f.reader.Close()
-		}
-	}()
 
 	createImagePost(ctx, w, user, content, files)
 }
@@ -186,27 +189,127 @@ type fileEntry struct {
 	extension   string
 }
 
-func imageFileInfo(fhContentType, filename string) (string, string) {
-	contentType := strings.ToLower(strings.TrimSpace(fhContentType))
-	extension := strings.ToLower(filepath.Ext(filename))
+type uploadValidationError struct {
+	status  int
+	message string
+}
 
-	if contentType == "" {
-		contentType = mime.TypeByExtension(extension)
-	}
-	if contentType == "" {
-		contentType = "image/jpeg"
-	}
+func isMultipartRequest(r *http.Request) bool {
+	contentType := strings.ToLower(r.Header.Get("Content-Type"))
+	return strings.HasPrefix(contentType, "multipart/form-data")
+}
 
-	switch contentType {
-	case "image/jpeg", "image/jpg":
-		return "image/jpeg", ".jpg"
-	case "image/png":
-		return "image/png", ".png"
-	default:
-		if extension == ".png" {
-			return "image/png", ".png"
+func parseImageFiles(r *http.Request) ([]*fileEntry, *uploadValidationError) {
+	if err := r.ParseMultipartForm(maxMultipartMemory); err != nil {
+		if isMaxBytesError(err) {
+			return nil, &uploadValidationError{status: http.StatusRequestEntityTooLarge, message: "post body is too large"}
 		}
-		return "image/jpeg", ".jpg"
+		return nil, &uploadValidationError{status: http.StatusBadRequest, message: "invalid multipart form"}
+	}
+
+	if r.MultipartForm == nil || r.MultipartForm.File == nil {
+		return nil, nil
+	}
+
+	headers := r.MultipartForm.File["images"]
+	if len(headers) > maxImagesPerPost {
+		return nil, &uploadValidationError{status: http.StatusBadRequest, message: "too many images"}
+	}
+
+	files := make([]*fileEntry, 0, len(headers))
+	for _, fh := range headers {
+		if fh.Size <= 0 {
+			closeFileEntries(files)
+			return nil, &uploadValidationError{status: http.StatusBadRequest, message: "empty image file"}
+		}
+		if fh.Size > maxImageUploadSize {
+			closeFileEntries(files)
+			return nil, &uploadValidationError{status: http.StatusRequestEntityTooLarge, message: "image file is too large"}
+		}
+
+		f, err := fh.Open()
+		if err != nil {
+			closeFileEntries(files)
+			return nil, &uploadValidationError{status: http.StatusBadRequest, message: "invalid image file"}
+		}
+
+		contentType, extension, err := imageFileInfo(f, fh.Filename)
+		if err != nil {
+			f.Close()
+			closeFileEntries(files)
+			return nil, &uploadValidationError{status: http.StatusBadRequest, message: "unsupported image file"}
+		}
+		if _, err := f.Seek(0, io.SeekStart); err != nil {
+			f.Close()
+			closeFileEntries(files)
+			return nil, &uploadValidationError{status: http.StatusBadRequest, message: "invalid image file"}
+		}
+
+		files = append(files, &fileEntry{
+			reader:      f,
+			size:        fh.Size,
+			contentType: contentType,
+			extension:   extension,
+		})
+	}
+
+	return files, nil
+}
+
+func closeFileEntries(files []*fileEntry) {
+	for _, f := range files {
+		f.reader.Close()
+	}
+}
+
+func imageFileInfo(file io.ReadSeeker, filename string) (string, string, error) {
+	var header [512]byte
+	n, err := io.ReadFull(file, header[:])
+	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		return "", "", fmt.Errorf("read image header failed: %w", err)
+	}
+	if n == 0 {
+		return "", "", fmt.Errorf("empty image file")
+	}
+
+	extension := strings.ToLower(filepath.Ext(filename))
+	contentType := http.DetectContentType(header[:n])
+	switch contentType {
+	case "image/jpeg":
+		return "image/jpeg", ".jpg", nil
+	case "image/png":
+		return "image/png", ".png", nil
+	default:
+		if extension == ".jpg" || extension == ".jpeg" || extension == ".png" {
+			return "", "", fmt.Errorf("image extension does not match content")
+		}
+		return "", "", fmt.Errorf("unsupported image type %q", contentType)
+	}
+}
+
+func isMaxBytesError(err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	return errors.As(err, &maxBytesErr)
+}
+
+func isProcessedImageKey(key string) bool {
+	if !strings.HasPrefix(key, "processed/") {
+		return false
+	}
+	if strings.Contains(key, "..") || strings.ContainsAny(key, "\\\x00") {
+		return false
+	}
+
+	name := strings.TrimPrefix(key, "processed/")
+	if name == "" || strings.Contains(name, "/") {
+		return false
+	}
+
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -288,7 +391,7 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 // handleGetImage 從 MinIO 讀圖並由 API 回傳，前端不用知道物件儲存內部位址。
 func handleGetImage(w http.ResponseWriter, r *http.Request) {
 	key := r.PathValue("key")
-	if key == "" {
+	if !isProcessedImageKey(key) {
 		http.NotFound(w, r)
 		return
 	}
@@ -309,6 +412,6 @@ func handleGetImage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", info.ContentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size))
-	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Header().Set("Cache-Control", "private, max-age=86400")
 	io.Copy(w, obj)
 }

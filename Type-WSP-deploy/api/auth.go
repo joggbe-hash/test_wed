@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	codePrefix = "vcode:"
-	codeTTL    = 5 * time.Minute
+	codePrefix         = "vcode:"
+	codeTTL            = 5 * time.Minute
+	rememberSessionTTL = 30 * 24 * time.Hour
 )
 
 type sendCodeRequest struct {
@@ -118,6 +119,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	Remember bool   `json:"remember"`
 }
 
 // handleLogin 檢查帳密後建立 Redis session，並用 HttpOnly cookie 回傳 session id。
@@ -146,7 +148,12 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	signed, err := CreateSession(ctx, &user)
+	sessionDuration := sessionTTL
+	if req.Remember {
+		sessionDuration = rememberSessionTTL
+	}
+
+	signed, err := CreateSessionWithTTL(ctx, &user, sessionDuration)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "create session failed"})
 		return
@@ -159,7 +166,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		HttpOnly: true,
 		Secure:   true,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400,
+		MaxAge:   int(sessionDuration.Seconds()),
 	})
 
 	writeJSON(w, http.StatusOK, M{"user": user})

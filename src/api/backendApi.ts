@@ -89,10 +89,10 @@ export function registerAccount(payload: {
   })
 }
 
-export function loginAccount(email: string, password: string) {
+export function loginAccount(email: string, password: string, remember = false) {
   return apiFetch<{ user: User }>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email, password, remember }),
   })
 }
 

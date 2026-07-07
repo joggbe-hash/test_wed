@@ -23,7 +23,7 @@ function openDatePicker() {
 </script>
 
 <template>
-  <label class="schedule-field" @click="openDatePicker">
+  <label class="schedule-field">
     <span>{{ label }}</span>
     <input ref="dateInput" v-model="model" type="date" @focus="openDatePicker">
   </label>

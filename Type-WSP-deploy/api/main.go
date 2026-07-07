@@ -53,8 +53,8 @@ func main() {
 	// Worker 圖片處理完成後透過 Redis Pub/Sub 通知，API 再轉成 WebSocket 推給前端。
 	mux.HandleFunc("GET /api/ws/", handleWebSocket)
 
-	// 圖片不直接公開 MinIO，由 API 代讀並回傳，方便之後補權限檢查。
-	mux.HandleFunc("GET /api/images/{key...}", handleGetImage)
+	// 圖片不直接公開 MinIO，由 API 驗證 session 與 key prefix 後代讀。
+	mux.HandleFunc("GET /api/images/{key...}", requireAuth(handleGetImage))
 
 	log.Println("API server listening on :5000")
 	if err := http.ListenAndServe(":5000", mux); err != nil {

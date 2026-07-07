@@ -65,12 +65,16 @@ func verifySID(signed string) (string, error) {
 
 // CreateSession 只把 signed sid 放 cookie，完整 user 資料存在 Redis，方便登出與 TTL 控制。
 func CreateSession(ctx context.Context, user *User) (string, error) {
+	return CreateSessionWithTTL(ctx, user, sessionTTL)
+}
+
+func CreateSessionWithTTL(ctx context.Context, user *User, ttl time.Duration) (string, error) {
 	sid := uuid.New().String()
 	data, err := json.Marshal(user)
 	if err != nil {
 		return "", fmt.Errorf("marshal session user failed: %w", err)
 	}
-	if err := rdb.Set(ctx, sessionPrefix+sid, data, sessionTTL).Err(); err != nil {
+	if err := rdb.Set(ctx, sessionPrefix+sid, data, ttl).Err(); err != nil {
 		return "", fmt.Errorf("save session failed: %w", err)
 	}
 	return signSID(sid), nil

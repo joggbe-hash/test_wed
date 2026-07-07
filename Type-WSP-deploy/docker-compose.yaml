@@ -17,7 +17,7 @@ services:
       MODSEC_RULE_ENGINE: On
       MODSEC_AUDIT_LOG: /dev/stdout
       MODSEC_AUDIT_ENGINE: RelevantOnly
-      MODSEC_REQ_BODY_LIMIT: 104857600
+      MODSEC_REQ_BODY_LIMIT: 41943040
       MODSEC_REQ_BODY_NOFILES_LIMIT: 131072
       PARANOIA: 1
       ANOMALY_INBOUND: 5
@@ -53,6 +53,7 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      SECRET_KEY: "${SECRET_KEY:?set SECRET_KEY in .env}"
     networks:
       - app_net
       - db_net

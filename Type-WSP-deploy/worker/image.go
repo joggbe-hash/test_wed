@@ -19,6 +19,8 @@ import (
 
 const maxDimension = 4096
 const jpegQuality = 95
+const maxRawImageBytes = 8 << 20
+const maxImagePixels = 20_000_000
 
 type processedImage struct {
 	data        []byte
@@ -43,8 +45,7 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) {
 			return
 		}
 
-		rawData, err := io.ReadAll(rawObj)
-		rawObj.Close()
+		rawData, err := readRawImage(rawObj)
 		if err != nil {
 			log.Printf("[image] read raw object failed: %v", err)
 			markPostFailed(ctx, payload.PostID)
@@ -108,9 +109,33 @@ func markPostFailed(ctx context.Context, postID int) {
 	systemPool.Exec(ctx, `UPDATE posts SET image_status = 'failed' WHERE id = $1`, postID)
 }
 
+func readRawImage(rawObj io.ReadCloser) ([]byte, error) {
+	defer rawObj.Close()
+
+	rawData, err := io.ReadAll(io.LimitReader(rawObj, maxRawImageBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(rawData)) > maxRawImageBytes {
+		return nil, fmt.Errorf("raw image exceeds %d bytes", maxRawImageBytes)
+	}
+	return rawData, nil
+}
+
 // resizeAndCompress 保留原圖格式：PNG 繼續輸出 PNG，其餘格式輸出 JPEG。
 // 小於 maxDimension 且方向正常時直接回傳原始 bytes，避免不必要的畫質損失。
 func resizeAndCompress(data []byte) (*processedImage, error) {
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("decode image config failed: %w", err)
+	}
+	if config.Width <= 0 || config.Height <= 0 {
+		return nil, fmt.Errorf("invalid image dimensions")
+	}
+	if int64(config.Width)*int64(config.Height) > maxImagePixels {
+		return nil, fmt.Errorf("image dimensions exceed %d pixels", maxImagePixels)
+	}
+
 	src, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("decode image failed, format=%s: %w", format, err)

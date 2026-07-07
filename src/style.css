@@ -323,6 +323,15 @@
     font-variant-numeric: tabular-nums;
   }
 
+  .date-schedule-modal-reminder-editing .date-schedule-calendar-mark,
+  .date-schedule-modal-task-prompt-open .date-schedule-calendar-mark {
+    @apply hidden;
+  }
+
+  .date-schedule-modal-task-prompt-open {
+    @apply pointer-events-none opacity-0;
+  }
+
   .date-schedule-title {
     @apply min-w-0 truncate pl-0 text-xl font-black text-white max-md:text-sm;
     grid-column: 4;
@@ -338,19 +347,98 @@
   }
 
   .date-schedule-reminders {
-    @apply grid min-h-[266px] shrink-0 grid-cols-[repeat(auto-fit,minmax(220px,260px))] content-start gap-12 overflow-y-auto border-b-[5px] border-black px-14 py-10 max-md:min-h-[220px] max-md:grid-cols-1 max-md:gap-4 max-md:px-5 max-md:py-6;
+    @apply flex h-[266px] shrink-0 gap-12 overflow-x-auto overflow-y-hidden overscroll-x-contain border-b-[5px] border-black px-14 py-10 max-md:h-[220px] max-md:gap-4 max-md:px-5 max-md:py-6;
+    scrollbar-color: #777 transparent;
+    scrollbar-width: thin;
+  }
+
+  .date-schedule-reminders::-webkit-scrollbar,
+  .date-schedule-tasks::-webkit-scrollbar {
+    height: 10px;
+  }
+
+  .date-schedule-reminders::-webkit-scrollbar-track,
+  .date-schedule-tasks::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .date-schedule-reminders::-webkit-scrollbar-thumb,
+  .date-schedule-tasks::-webkit-scrollbar-thumb {
+    background: #8f8f8f;
+    border-radius: 999px;
   }
 
   .date-reminder-card {
-    @apply relative flex min-h-[190px] flex-col justify-center overflow-hidden rounded-[18px] border border-black bg-white px-4 py-5 text-center text-black max-md:min-h-[152px];
+    @apply relative grid h-[190px] w-[260px] shrink-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden rounded-[18px] border border-black bg-white px-4 py-5 text-center text-black max-md:h-[152px] max-md:w-[220px];
   }
 
   .date-reminder-card h3 {
-    @apply mb-6 text-2xl font-black leading-tight max-md:mb-3 max-md:text-xl;
+    @apply min-w-0 truncate text-2xl font-black leading-tight max-md:text-xl;
   }
 
   .date-reminder-card p {
     @apply whitespace-pre-wrap break-words text-lg font-bold leading-6 max-md:text-base;
+  }
+
+  .date-reminder-note {
+    @apply flex min-h-0 items-center justify-center overflow-y-auto px-1 py-2;
+  }
+
+  .date-reminder-time {
+    @apply text-[18px] font-black leading-none text-[#6f6f6f] max-md:text-base;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .date-add-reminder-card {
+    @apply relative flex h-[190px] w-[260px] shrink-0 cursor-pointer flex-col items-center justify-center gap-6 rounded-[18px] border-2 border-dashed border-[#8e8e8e] bg-white px-4 py-5 text-center text-[#7f7f7f] opacity-0 transition-all duration-150 pointer-events-none hover:border-[#666] hover:text-[#555] focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7a5132] max-md:h-[152px] max-md:w-[220px];
+  }
+
+  .date-add-reminder-card-empty {
+    @apply pointer-events-auto opacity-100;
+  }
+
+  .date-add-reminder-empty-label {
+    @apply absolute inset-0 flex items-center justify-center px-6 text-xl font-bold leading-tight text-[#858585] opacity-0 transition-opacity duration-150 max-md:text-base;
+  }
+
+  .date-add-reminder-add-label {
+    @apply text-2xl font-black leading-tight max-md:text-xl;
+  }
+
+  .date-add-reminder-card strong {
+    @apply text-[42px] font-black leading-none max-md:text-3xl;
+  }
+
+  .date-add-reminder-card-empty .date-add-reminder-empty-label {
+    @apply opacity-100;
+  }
+
+  .date-add-reminder-card-empty .date-add-reminder-add-label,
+  .date-add-reminder-card-empty strong {
+    @apply opacity-0 transition-opacity duration-150;
+  }
+
+  .date-add-reminder-card-empty:hover .date-add-reminder-empty-label,
+  .date-add-reminder-card-empty:focus-visible .date-add-reminder-empty-label {
+    @apply opacity-0;
+  }
+
+  .date-add-reminder-card-empty:hover .date-add-reminder-add-label,
+  .date-add-reminder-card-empty:hover strong,
+  .date-add-reminder-card-empty:focus-visible .date-add-reminder-add-label,
+  .date-add-reminder-card-empty:focus-visible strong {
+    @apply opacity-100;
+  }
+
+  .date-schedule-reminders:hover .date-add-reminder-card,
+  .date-schedule-reminders:focus-within .date-add-reminder-card {
+    @apply pointer-events-auto opacity-100;
+  }
+
+  @media (hover: none) {
+    .date-add-reminder-card {
+      @apply pointer-events-auto opacity-100;
+    }
   }
 
   .date-edit-panel {
@@ -395,6 +483,159 @@
     @apply bg-[#ece4dc] text-[#7a6f68] hover:bg-[#ded3c7];
   }
 
+  .reminder-edit-modal {
+    @apply fixed left-1/2 top-1/2 z-[670] flex -translate-x-1/2 -translate-y-1/2 flex-col overflow-visible border-2 border-black bg-white shadow-[0_24px_70px_rgba(0,0,0,0.22)] max-md:overflow-y-auto;
+    width: min(1148px, calc(100vw - 48px));
+    max-height: calc(100dvh - 48px);
+    animation: composeModalIn 240ms cubic-bezier(0.2, 0.9, 0.22, 1.05) both;
+  }
+
+  .reminder-edit-calendar-mark {
+    @apply absolute left-[92px] top-[-70px] z-10 flex h-[140px] w-[188px] items-end justify-center rounded-[10px] bg-black p-4 pb-[16px] max-md:left-[56px] max-md:top-[-34px] max-md:h-[86px] max-md:w-[104px] max-md:p-2;
+  }
+
+  .reminder-edit-calendar-mark::before,
+  .reminder-edit-calendar-mark::after {
+    @apply absolute top-[-42px] h-[84px] w-[34px] rounded-t-md bg-black content-[''] max-md:top-[-22px] max-md:h-[44px] max-md:w-[18px];
+  }
+
+  .reminder-edit-calendar-mark::before {
+    @apply left-[40px] max-md:left-[22px];
+  }
+
+  .reminder-edit-calendar-mark::after {
+    @apply right-[40px] max-md:right-[22px];
+  }
+
+  .reminder-edit-calendar-mark span {
+    @apply flex h-[68px] w-full items-center justify-center bg-white text-[56px] font-black leading-none text-black max-md:h-[44px] max-md:text-3xl;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .reminder-edit-header {
+    @apply relative flex min-h-[88px] items-center justify-center border-b border-black bg-[#8d8d8b] px-8 text-white max-md:min-h-16 max-md:px-5;
+  }
+
+  .reminder-edit-header h3 {
+    @apply text-[40px] font-black leading-none tracking-normal max-md:text-3xl;
+  }
+
+  .reminder-edit-close {
+    @apply absolute right-[-2px] top-0 flex size-12 cursor-pointer items-center justify-center border border-black bg-[#d8d8d8] text-[40px] font-light leading-none text-black transition-colors hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black max-md:size-10 max-md:text-3xl;
+  }
+
+  .reminder-edit-close span {
+    @apply block leading-none;
+  }
+
+  .reminder-edit-body {
+    @apply px-5 py-5 max-md:px-4;
+  }
+
+  .reminder-edit-field {
+    @apply mb-5 flex min-h-[82px] items-center rounded-[10px] border-2 border-dotted border-[#333] px-3 text-[30px] font-bold leading-none text-[#777] max-md:min-h-16 max-md:text-xl;
+  }
+
+  .reminder-edit-field span {
+    @apply shrink-0;
+  }
+
+  .reminder-edit-field input {
+    @apply h-12 min-w-0 flex-1 border-0 bg-transparent px-3 py-0 text-[30px] font-bold leading-[48px] text-[#222] outline-none placeholder:text-[#d0d0d0] max-md:h-9 max-md:text-xl max-md:leading-9;
+  }
+
+  .reminder-edit-note-field {
+    @apply min-h-[82px];
+  }
+
+  .reminder-note-optional {
+    @apply pointer-events-none ml-3 shrink-0 text-[30px] font-bold leading-none text-[#d0d0d0] max-md:ml-2 max-md:text-xl;
+  }
+
+  .reminder-edit-note-field textarea {
+    @apply min-h-[58px] min-w-0 flex-1 resize-none overflow-y-auto border-0 bg-transparent px-3 py-2 text-[30px] font-bold leading-tight text-[#222] outline-none max-md:min-h-14 max-md:text-xl;
+  }
+
+  .reminder-time-panel {
+    @apply mb-10 grid min-h-[214px] grid-cols-[140px_minmax(220px,262px)_92px_minmax(220px,262px)] items-center justify-center gap-14 rounded-[10px] border-2 border-dotted border-[#333] px-6 py-5 max-lg:grid-cols-[88px_1fr_56px_1fr] max-lg:gap-6 max-md:grid-cols-1 max-md:gap-4;
+  }
+
+  .reminder-time-icon {
+    @apply relative mx-auto block size-10 rounded-full border-[3px] border-black bg-transparent max-md:size-9;
+  }
+
+  .reminder-time-icon::before,
+  .reminder-time-icon::after {
+    @apply absolute left-1/2 top-1/2 block origin-left rounded-full bg-black content-[''];
+  }
+
+  .reminder-time-icon::before {
+    @apply h-[3px] w-3 -translate-y-1/2 rotate-0;
+  }
+
+  .reminder-time-icon::after {
+    @apply h-[3px] w-4 -translate-x-[2px] -translate-y-1/2 rotate-[-90deg];
+  }
+
+  .reminder-time-card {
+    @apply flex h-[172px] flex-col items-center justify-center rounded-[20px] border border-black bg-white px-5 text-center max-md:h-[132px];
+  }
+
+  .reminder-date-picker,
+  .reminder-clock-picker {
+    @apply relative block cursor-pointer;
+  }
+
+  .reminder-date-picker span {
+    @apply block whitespace-nowrap text-[26px] font-black leading-none text-black max-md:text-xl;
+  }
+
+  .reminder-clock-picker strong {
+    @apply mt-7 inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-full px-4 py-2 text-[32px] font-black leading-none text-black transition-colors max-md:mt-5 max-md:min-w-[96px] max-md:text-2xl;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .reminder-clock-picker:hover strong,
+  .reminder-clock-picker:focus-within strong {
+    @apply bg-[#eeeef8];
+  }
+
+  .reminder-date-picker input,
+  .reminder-clock-picker input {
+    @apply absolute inset-0 size-full cursor-pointer opacity-0;
+  }
+
+  .reminder-time-arrow {
+    @apply text-center text-[42px] font-normal leading-none text-black max-md:text-3xl;
+  }
+
+  .reminder-edit-actions {
+    @apply ml-auto flex w-[366px] max-w-full flex-col gap-5 max-md:w-full;
+  }
+
+  .reminder-save-next,
+  .reminder-save,
+  .reminder-cancel {
+    @apply h-14 cursor-pointer whitespace-nowrap rounded-full border-0 px-8 text-[28px] font-bold leading-none transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 max-md:text-lg;
+  }
+
+  .reminder-save-next {
+    @apply w-full bg-[#8f8f8f] text-white hover:bg-[#7f7f7f];
+  }
+
+  .reminder-edit-action-row {
+    @apply grid gap-5;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .reminder-save {
+    @apply bg-[#8f8f8f] text-white hover:bg-[#7f7f7f];
+  }
+
+  .reminder-cancel {
+    @apply bg-[#d2d2d2] text-[#8f8f8f] hover:bg-[#c6c6c6] hover:text-[#666];
+  }
+
   .date-card-actions {
     @apply absolute inset-0 z-10 m-0 flex flex-col items-center justify-center gap-5 rounded-[18px] border border-black bg-[#d3d3d3] px-8 py-5 opacity-0 transition-opacity duration-150 pointer-events-none;
   }
@@ -419,7 +660,9 @@
   }
 
   .date-schedule-tasks {
-    @apply flex min-h-0 flex-1 gap-12 overflow-x-auto px-8 py-7 max-md:gap-4 max-md:px-5 max-md:py-5;
+    @apply flex min-h-0 flex-1 gap-12 overflow-x-auto overflow-y-hidden overscroll-x-contain px-8 py-7 max-md:gap-4 max-md:px-5 max-md:py-5;
+    scrollbar-color: #777 transparent;
+    scrollbar-width: thin;
   }
 
   .date-task-card {
@@ -450,6 +693,58 @@
     @apply mt-0;
   }
 
+  .date-add-task-card {
+    @apply relative flex min-h-[312px] w-[260px] shrink-0 cursor-pointer flex-col items-center justify-center gap-6 rounded-[18px] border-2 border-dashed border-[#cfcfcf] bg-white px-4 py-5 text-center text-[#7f7f7f] opacity-0 transition-all duration-150 pointer-events-none hover:border-[#8e8e8e] hover:text-[#555] focus-visible:pointer-events-auto focus-visible:opacity-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#7a5132] max-md:w-[220px];
+  }
+
+  .date-add-task-card-empty {
+    @apply pointer-events-auto opacity-100;
+  }
+
+  .date-add-task-empty-label {
+    @apply absolute inset-0 flex items-center justify-center px-6 text-xl font-bold leading-tight text-[#858585] opacity-0 transition-opacity duration-150 max-md:text-base;
+  }
+
+  .date-add-task-add-label {
+    @apply text-2xl font-black leading-tight max-md:text-xl;
+  }
+
+  .date-add-task-card strong {
+    @apply text-[42px] font-black leading-none max-md:text-3xl;
+  }
+
+  .date-add-task-card-empty .date-add-task-empty-label {
+    @apply opacity-100;
+  }
+
+  .date-add-task-card-empty .date-add-task-add-label,
+  .date-add-task-card-empty strong {
+    @apply opacity-0 transition-opacity duration-150;
+  }
+
+  .date-add-task-card-empty:hover .date-add-task-empty-label,
+  .date-add-task-card-empty:focus-visible .date-add-task-empty-label {
+    @apply opacity-0;
+  }
+
+  .date-add-task-card-empty:hover .date-add-task-add-label,
+  .date-add-task-card-empty:hover strong,
+  .date-add-task-card-empty:focus-visible .date-add-task-add-label,
+  .date-add-task-card-empty:focus-visible strong {
+    @apply opacity-100;
+  }
+
+  .date-schedule-tasks:hover .date-add-task-card,
+  .date-schedule-tasks:focus-within .date-add-task-card {
+    @apply pointer-events-auto opacity-100;
+  }
+
+  @media (hover: none) {
+    .date-add-task-card {
+      @apply pointer-events-auto opacity-100;
+    }
+  }
+
   .date-schedule-empty {
     @apply flex min-h-[140px] items-center justify-center rounded-[18px] border border-dashed border-[#cfcfcf] px-8 text-xl font-bold text-[#7a7a7a] max-md:min-h-[96px] max-md:text-base;
   }
@@ -477,24 +772,145 @@
   }
 
   .task-panel {
-    @apply px-5 py-4 text-[#1f252b];
+    @apply relative px-5 py-4 text-[#1f252b];
   }
 
   .task-list {
-    @apply mt-3 flex max-h-[76px] flex-col gap-2 overflow-y-auto overscroll-contain pr-1;
+    @apply mt-3 flex max-h-[124px] flex-col gap-2 overflow-y-auto overscroll-contain pr-1 transition-[max-height] duration-200;
+    scrollbar-color: #777 transparent;
     scrollbar-width: thin;
   }
 
+  .task-list-expanded {
+    @apply max-h-[352px] overflow-y-auto;
+  }
+
+  .task-list::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .task-list::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .task-list::-webkit-scrollbar-thumb {
+    background-color: #777;
+    border: 2px solid transparent;
+    border-radius: 999px;
+    background-clip: padding-box;
+  }
+
   .task-row {
-    @apply grid min-h-5 cursor-pointer grid-cols-[18px_1fr] items-center gap-4 text-[14px] leading-5 text-[#1f252b];
+    @apply relative grid min-h-9 grid-cols-[18px_minmax(0,1fr)_34px] items-center gap-2 rounded-md px-1 text-[14px] leading-5 text-[#1f252b] transition-colors hover:bg-[#faf7f3] focus-within:z-30 focus-within:bg-[#faf7f3];
   }
 
   .task-row input {
     @apply size-4 cursor-pointer appearance-none rounded border border-[#bfc5c8] bg-white transition-colors checked:border-brown checked:bg-brown focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a98769];
   }
 
-  .task-row span {
-    @apply text-center;
+  .task-row-title {
+    @apply min-w-0 cursor-pointer truncate text-left;
+  }
+
+  .sidebar-reminder-row {
+    @apply grid-cols-[96px_minmax(0,1fr)];
+  }
+
+  .sidebar-reminder-time {
+    @apply whitespace-nowrap text-left text-[11px] font-bold text-[#777];
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sidebar-reminder-title {
+    @apply min-w-0 truncate text-left;
+  }
+
+  .sidebar-reminder-empty {
+    @apply grid-cols-1;
+  }
+
+  .sidebar-reminder-empty .sidebar-reminder-title {
+    @apply text-center font-bold;
+  }
+
+  .task-row-actions {
+    @apply relative flex shrink-0 justify-end;
+  }
+
+  .task-menu-trigger {
+    @apply flex size-8 cursor-pointer items-center justify-center rounded-md border border-transparent bg-transparent text-[#7f7f7f] transition-colors hover:border-[#d6cec6] hover:bg-white hover:text-[#1f252b] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a98769];
+  }
+
+  .task-menu-trigger span {
+    @apply text-2xl leading-none;
+  }
+
+  .task-menu-panel {
+    @apply fixed z-50 flex w-24 flex-col overflow-hidden rounded-md border border-[#d6cec6] bg-white py-1 text-[#1f252b] shadow-[0_10px_24px_rgba(31,37,43,0.16)];
+  }
+
+  .task-menu-panel button {
+    @apply h-8 cursor-pointer bg-transparent px-3 text-left text-[13px] font-bold leading-8 transition-colors hover:bg-[#f4eee7] focus-visible:bg-[#f4eee7] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[#a98769];
+  }
+
+  .task-delete-backdrop {
+    @apply fixed inset-0 z-[900] flex items-center justify-center bg-[#2f241c]/68 px-5 py-6;
+  }
+
+  .task-delete-dialog {
+    @apply grid w-full max-w-[440px] overflow-hidden rounded-[18px] border border-[#d5c5b5] bg-[#fffdf9] text-left text-[#2f261f] shadow-[0_24px_70px_rgba(42,28,18,0.3),0_1px_0_rgba(255,255,255,0.8)_inset] max-md:max-w-[calc(100vw-32px)] max-md:rounded-[14px];
+  }
+
+  .task-delete-content {
+    @apply px-7 pb-6 pt-7 max-md:px-5 max-md:pb-5 max-md:pt-6;
+  }
+
+  .task-delete-kicker {
+    @apply mb-4 inline-flex h-7 items-center rounded-full border border-[#d7c7b7] bg-[#fbf6ef] px-3 text-xs font-black text-[#a98769];
+  }
+
+  .task-delete-dialog h2 {
+    @apply text-2xl font-black leading-tight text-brown max-md:text-xl;
+  }
+
+  .task-delete-task-card {
+    @apply mt-5 grid gap-1 rounded-[12px] border border-[#d7c7b7] bg-[#fbf6ef] px-4 py-3 shadow-[0_1px_0_rgba(255,255,255,0.8)_inset];
+  }
+
+  .task-delete-task-card span {
+    @apply text-xs font-black text-[#a98769];
+  }
+
+  .task-delete-task-card strong {
+    @apply min-w-0 break-words text-lg font-black leading-7 text-[#2f261f] max-md:text-base;
+  }
+
+  .task-delete-dialog p {
+    @apply mt-5 text-sm font-semibold leading-6 text-[#7a6f68];
+  }
+
+  .task-delete-actions {
+    @apply grid grid-cols-2 gap-3 border-t border-[#d7c7b7] bg-[#fbf6ef] px-7 py-5 max-md:px-5 max-md:py-4;
+  }
+
+  .task-delete-actions button {
+    @apply h-11 cursor-pointer rounded-[10px] text-sm font-black leading-none transition-all hover:-translate-y-0.5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a98769];
+  }
+
+  .task-delete-cancel {
+    @apply border border-[#d7c7b7] bg-[#fffdf9] text-[#837367] hover:bg-[#f5ece3] hover:text-brown;
+  }
+
+  .task-delete-confirm {
+    @apply border border-brown bg-brown text-white shadow-[0_8px_18px_rgba(74,51,32,0.18)] hover:bg-brown-dark;
+  }
+
+  .task-note-preview {
+    @apply pointer-events-none fixed z-[9999] w-max min-w-[72px] max-w-[260px] -translate-y-1/2 whitespace-pre-wrap break-words rounded border border-white bg-[#1f1f1f] px-2.5 py-1.5 text-left text-[12px] font-semibold leading-4 text-white shadow-[0_4px_10px_rgba(0,0,0,0.35)];
+    margin: 0;
+    color: #ffffff;
+    text-align: left;
+    animation: taskNoteIn 140ms ease-out both;
   }
 
   .add-task-btn {
@@ -1103,7 +1519,7 @@
   }
 
   .inspiration-modal {
-    @apply flex h-[min(84vh,952px)] w-full max-w-[1140px] flex-col overflow-hidden border-2 border-black bg-white shadow-[0_26px_76px_rgba(0,0,0,0.2)] max-md:h-[calc(100dvh-32px)];
+    @apply relative flex h-[min(84vh,952px)] w-full max-w-[1140px] flex-col overflow-hidden border-2 border-black bg-white shadow-[0_26px_76px_rgba(0,0,0,0.2)] max-md:h-[calc(100dvh-32px)];
     animation: composeModalIn 240ms cubic-bezier(0.2, 0.9, 0.22, 1.05) both;
   }
 
@@ -1238,12 +1654,47 @@
   }
 
   .inspiration-item p {
-    @apply min-w-0 break-words;
+    @apply min-w-0 overflow-y-auto break-words whitespace-pre-wrap;
     grid-column: 2 / 4;
+    max-height: 175px;
   }
 
   .inspiration-thumb + p {
     grid-column: 3 / 4;
+  }
+
+  .inspiration-edit-panel {
+    @apply flex min-w-0 flex-col gap-2;
+    grid-column: 2 / 4;
+  }
+
+  .inspiration-thumb + .inspiration-edit-panel {
+    grid-column: 3 / 4;
+  }
+
+  .inspiration-edit-panel textarea {
+    @apply min-h-20 w-full resize-y rounded-[8px] border border-black bg-white px-3 py-2 text-[24px] font-normal leading-snug text-black outline-none focus:border-[#8f8f8f] focus:ring-2 focus:ring-[#8f8f8f]/20 max-md:text-base;
+    max-height: 175px;
+  }
+
+  .inspiration-edit-footer {
+    @apply flex flex-wrap items-center justify-between gap-3 text-sm font-bold text-[#777];
+  }
+
+  .inspiration-edit-footer > div {
+    @apply flex gap-2;
+  }
+
+  .inspiration-edit-footer button {
+    @apply cursor-pointer rounded-full border-0 px-5 py-2 text-sm font-bold leading-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black;
+  }
+
+  .inspiration-edit-footer button:first-child {
+    @apply bg-[#8f8f8f] text-white hover:bg-[#7f7f7f];
+  }
+
+  .inspiration-edit-footer button:last-child {
+    @apply bg-[#d1d1d1] text-[#7f7f7f] hover:bg-[#dfdfdf];
   }
 
   .inspiration-item-actions {
@@ -1261,9 +1712,61 @@
     stroke-linejoin: round;
   }
 
+  .inspiration-delete-layer {
+    @apply absolute inset-0 z-30 flex items-center justify-center bg-white/55;
+    animation: modalBackdropIn 150ms ease-out both;
+  }
+
+  .inspiration-delete-dialog {
+    @apply w-full border-y-2 border-black bg-white shadow-[0_20px_48px_rgba(0,0,0,0.18)];
+    animation: composeModalIn 180ms cubic-bezier(0.2, 0.9, 0.22, 1.05) both;
+  }
+
+  .inspiration-delete-header {
+    @apply relative flex min-h-[90px] items-center bg-[#1f1f1f] px-8 text-white max-md:min-h-16 max-md:px-5;
+  }
+
+  .inspiration-delete-header h3 {
+    @apply text-[42px] font-normal leading-none tracking-normal max-md:text-3xl;
+  }
+
+  .inspiration-delete-close {
+    @apply absolute right-[-2px] top-[-2px] flex size-12 cursor-pointer items-center justify-center border border-black bg-[#e8e8e8] text-[40px] font-light leading-none text-black transition-colors hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black max-md:size-10 max-md:text-3xl;
+  }
+
+  .inspiration-delete-close span {
+    @apply block leading-none;
+  }
+
+  .inspiration-delete-body {
+    @apply flex min-h-[420px] flex-col items-center justify-center gap-20 px-8 py-20 text-center text-black max-md:min-h-[320px] max-md:gap-10 max-md:px-5 max-md:py-12;
+  }
+
+  .inspiration-delete-body p {
+    @apply max-w-[920px] text-[42px] font-normal leading-snug tracking-normal max-md:text-2xl;
+  }
+
+  .inspiration-delete-actions {
+    @apply flex flex-wrap items-center justify-center gap-8 max-md:gap-4;
+  }
+
+  .inspiration-delete-actions button {
+    @apply h-[84px] min-w-[256px] cursor-pointer rounded-full border-0 px-10 text-[36px] font-bold leading-none transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black max-md:h-14 max-md:min-w-[140px] max-md:px-6 max-md:text-xl;
+  }
+
+  .inspiration-delete-confirm {
+    @apply bg-[#8f8f8f] text-white hover:bg-[#7f7f7f];
+  }
+
+  .inspiration-delete-cancel {
+    @apply bg-[#d1d1d1] text-[#8a8a8a] hover:bg-[#dfdfdf];
+  }
+
   @media (max-width: 767px) {
     .inspiration-item p,
     .inspiration-thumb + p,
+    .inspiration-edit-panel,
+    .inspiration-thumb + .inspiration-edit-panel,
     .inspiration-item-actions {
       grid-column: 2;
     }
@@ -1316,7 +1819,15 @@
   }
 
   .add-task-note-field {
-    @apply min-h-[104px] items-center;
+    @apply min-h-[104px] items-start pt-4;
+  }
+
+  .add-task-note-field span {
+    @apply pt-2;
+  }
+
+  .add-task-note-field textarea {
+    @apply pt-2;
   }
 
   .add-task-field textarea {
@@ -1344,7 +1855,7 @@
   }
 
   .add-task-importance-dot.selected {
-    @apply bg-[#8f8f8f] shadow-[inset_0_0_0_7px_white];
+    @apply bg-[#8f8f8f] shadow-none;
   }
 
   .add-task-actions {
@@ -1354,7 +1865,7 @@
   .add-task-save-next,
   .add-task-save,
   .add-task-cancel {
-    @apply h-14 cursor-pointer rounded-full border-0 px-8 text-[28px] font-bold leading-none transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 max-md:text-lg;
+    @apply h-14 cursor-pointer whitespace-nowrap rounded-full border-0 px-8 text-[28px] font-bold leading-none transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 max-md:text-lg;
   }
 
   .add-task-save-next {
@@ -1362,7 +1873,8 @@
   }
 
   .add-task-action-row {
-    @apply grid grid-cols-[1fr_1fr] gap-5;
+    @apply grid gap-5;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
   }
 
   .add-task-save {
@@ -1374,11 +1886,11 @@
   }
 
   .daily-task-backdrop {
-    @apply fixed inset-0 z-[500] flex items-center justify-center bg-black/60 px-6 py-8;
+    @apply fixed inset-0 z-[800] flex items-center justify-center bg-black/20 px-6 py-8 backdrop-blur-[1px] max-md:px-3;
   }
 
   .daily-task-modal {
-    @apply relative flex min-h-[min(78vh,720px)] w-full max-w-[1240px] flex-col rounded-[24px] bg-black px-14 pb-12 pt-14 text-white shadow-[0_30px_90px_rgba(0,0,0,0.35)] max-md:min-h-[calc(100dvh-32px)] max-md:px-5 max-md:pb-6 max-md:pt-8;
+    @apply relative flex min-h-[min(78vh,780px)] w-full max-w-[1240px] flex-col rounded-[6px] bg-black px-14 pb-12 pt-14 text-white shadow-[0_30px_90px_rgba(0,0,0,0.38)] max-md:min-h-[calc(100dvh-32px)] max-md:px-5 max-md:pb-6 max-md:pt-8;
     animation: composeModalIn 320ms cubic-bezier(0.2, 0.9, 0.22, 1.12) both;
   }
 
@@ -1387,15 +1899,15 @@
   }
 
   .daily-task-modal h2 {
-    @apply mb-16 text-center text-[42px] font-black leading-tight text-white max-md:mb-8 max-md:text-[28px];
+    @apply mb-16 text-center text-[48px] font-black leading-tight tracking-normal text-white max-md:mb-8 max-md:text-[28px];
   }
 
   .daily-task-form {
-    @apply mx-auto flex w-full max-w-[1120px] flex-col gap-5 rounded-[24px] bg-white px-8 py-7 text-[#1f1f1f] max-md:rounded-[16px] max-md:px-4;
+    @apply mx-auto flex w-full max-w-[1124px] flex-col gap-5 rounded-[28px] bg-white px-8 py-7 text-[#1f1f1f] max-md:rounded-[16px] max-md:px-4;
   }
 
   .daily-task-field {
-    @apply grid min-h-20 grid-cols-[auto_minmax(0,1fr)] items-center rounded-[10px] border border-dashed border-black px-4 text-[26px] font-bold leading-none text-[#555] max-md:min-h-14 max-md:grid-cols-1 max-md:items-start max-md:gap-2 max-md:py-3 max-md:text-base;
+    @apply grid min-h-20 grid-cols-[auto_minmax(0,1fr)] items-center rounded-[10px] border-2 border-dotted border-[#333] px-4 text-[26px] font-bold leading-none text-[#555] max-md:min-h-14 max-md:grid-cols-1 max-md:items-start max-md:gap-2 max-md:py-3 max-md:text-base;
   }
 
   .daily-task-field span {
@@ -1411,8 +1923,46 @@
     @apply min-h-12 resize-none;
   }
 
-  .daily-task-note-field textarea {
-    @apply pt-3;
+  .daily-task-note-field {
+    @apply items-center pt-0;
+  }
+
+  .daily-task-time-panel {
+    @apply grid min-h-[108px] grid-cols-[150px_minmax(220px,262px)_120px_minmax(220px,262px)] items-center justify-center rounded-[10px] border-2 border-dotted border-[#333] px-6 py-4 text-black max-lg:grid-cols-[90px_minmax(190px,1fr)_72px_minmax(190px,1fr)] max-md:grid-cols-1 max-md:gap-4;
+  }
+
+  .daily-task-time-icon {
+    @apply relative mx-auto block size-10 rounded-full border-[3px] border-black bg-transparent max-md:size-9;
+  }
+
+  .daily-task-time-icon::before,
+  .daily-task-time-icon::after {
+    @apply absolute left-1/2 top-1/2 block origin-left rounded-full bg-black content-[''];
+  }
+
+  .daily-task-time-icon::before {
+    @apply h-[3px] w-3 -translate-y-1/2;
+  }
+
+  .daily-task-time-icon::after {
+    @apply h-[3px] w-4 -translate-x-[2px] -translate-y-1/2 rotate-[-90deg];
+  }
+
+  .daily-task-time-pill {
+    @apply relative flex h-[66px] cursor-pointer items-center justify-center rounded-[20px] border border-black bg-white px-8 transition-colors hover:bg-[#f5f5f5] focus-within:bg-[#f5f5f5] max-md:h-14;
+  }
+
+  .daily-task-time-pill strong {
+    @apply text-[32px] font-black leading-none text-black max-md:text-2xl;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .daily-task-time-pill input {
+    @apply absolute inset-0 size-full cursor-pointer opacity-0;
+  }
+
+  .daily-task-time-arrow {
+    @apply text-center text-[42px] font-normal leading-none text-black max-md:text-3xl;
   }
 
   .daily-task-footer {
@@ -1432,11 +1982,11 @@
   }
 
   .daily-task-importance-dot {
-    @apply size-16 cursor-pointer rounded-full border border-black bg-white transition-all hover:-translate-y-0.5 hover:bg-[#f4efea] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#a98769] max-md:size-12;
+    @apply size-16 cursor-pointer rounded-full border border-black bg-white transition-all hover:-translate-y-0.5 hover:bg-[#f3f3f3] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black max-md:size-12;
   }
 
   .daily-task-importance-dot.selected {
-    @apply bg-brown shadow-[inset_0_0_0_9px_white];
+    @apply bg-[#8f8f8f] shadow-none;
   }
 
   .daily-task-actions {
@@ -1454,6 +2004,140 @@
 
   .daily-task-cancel {
     @apply bg-[#d2d2d2] text-[#8b8b8b] hover:bg-[#c2c2c2] hover:text-[#555];
+  }
+
+  .daily-task-editor-backdrop {
+    @apply z-[880] bg-black/20 px-0 py-0 backdrop-blur-[1px];
+  }
+
+  .daily-task-editor-modal {
+    @apply min-h-0 max-w-none overflow-visible rounded-none border-2 border-black bg-white px-0 pb-0 pt-0 text-black shadow-[0_24px_70px_rgba(0,0,0,0.22)] max-md:overflow-y-auto;
+    width: min(1148px, calc(100vw - 48px));
+    max-height: calc(100dvh - 48px);
+    animation: composeModalIn 240ms cubic-bezier(0.2, 0.9, 0.22, 1.05) both;
+  }
+
+  .daily-task-editor-calendar-mark {
+    @apply absolute left-[92px] top-[-70px] z-10 flex h-[140px] w-[188px] items-end justify-center rounded-[10px] bg-black p-4 pb-[16px] max-md:left-[56px] max-md:top-[-34px] max-md:h-[86px] max-md:w-[104px] max-md:p-2;
+  }
+
+  .daily-task-editor-calendar-mark::before,
+  .daily-task-editor-calendar-mark::after {
+    @apply absolute top-[-42px] h-[84px] w-[34px] rounded-t-md bg-black content-[''] max-md:top-[-22px] max-md:h-[44px] max-md:w-[18px];
+  }
+
+  .daily-task-editor-calendar-mark::before {
+    @apply left-[40px] max-md:left-[22px];
+  }
+
+  .daily-task-editor-calendar-mark::after {
+    @apply right-[40px] max-md:right-[22px];
+  }
+
+  .daily-task-editor-calendar-mark span {
+    @apply flex h-[68px] w-full items-center justify-center bg-white text-[56px] font-black leading-none text-black max-md:h-[44px] max-md:text-3xl;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .daily-task-editor-header {
+    @apply relative flex min-h-[88px] items-center justify-center border-b border-black bg-[#8d8d8b] px-8 text-white max-md:min-h-16 max-md:px-5;
+  }
+
+  .daily-task-editor-header h2 {
+    @apply m-0 text-[40px] font-black leading-none tracking-normal text-white max-md:text-3xl;
+  }
+
+  .daily-task-editor-close {
+    @apply absolute right-[-2px] top-[-2px] flex size-12 cursor-pointer items-center justify-center border border-black bg-[#d8d8d8] text-[40px] font-light leading-none text-black transition-colors hover:bg-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black max-md:size-10 max-md:text-3xl;
+  }
+
+  .daily-task-editor-close span {
+    @apply block leading-none;
+  }
+
+  .daily-task-editor-form {
+    @apply mx-0 max-w-none gap-5 overflow-y-auto rounded-none bg-white px-5 py-5 text-black max-md:px-4;
+    max-height: calc(100dvh - 140px);
+  }
+
+  .daily-task-editor-title-field {
+    @apply mx-0 grid min-h-[94px] grid-cols-[auto_minmax(0,1fr)_auto] gap-3 rounded-[10px] border-2 border-dotted border-[#333] px-3 max-md:grid-cols-1;
+  }
+
+  .daily-task-editor-field-label {
+    @apply shrink-0 text-[30px] font-bold leading-none text-[#777] max-md:text-xl;
+  }
+
+  .daily-task-editor-title-field input {
+    @apply h-12 px-2 text-[30px] leading-[48px] max-md:h-9 max-md:text-xl max-md:leading-9;
+  }
+
+  .daily-task-editor-importance {
+    @apply ml-8 justify-self-end max-md:ml-0 max-md:justify-self-start;
+  }
+
+  .daily-task-editor-importance .daily-task-importance-options {
+    @apply flex-nowrap gap-5 max-md:gap-3;
+  }
+
+  .daily-task-editor-importance .daily-task-importance-dot {
+    @apply size-[54px] max-md:size-11;
+  }
+
+  .daily-task-editor-note-field {
+    @apply mx-0 grid min-h-[82px] grid-cols-[auto_auto_minmax(0,1fr)] items-center rounded-[10px] border-2 border-dotted border-[#333] px-3 py-0 max-md:grid-cols-1 max-md:items-start max-md:gap-2 max-md:py-3;
+  }
+
+  .daily-task-note-optional {
+    @apply pointer-events-none ml-3 shrink-0 text-[30px] font-bold leading-none text-[#d0d0d0] max-md:ml-0 max-md:text-xl;
+  }
+
+  .daily-task-editor-note-field textarea {
+    @apply col-start-3 min-h-[58px] px-3 py-2 text-[30px] leading-tight max-md:col-start-auto max-md:min-h-14 max-md:px-0 max-md:text-xl;
+  }
+
+  .daily-task-editor-time-panel {
+    @apply mx-0 min-h-[214px] grid-cols-[140px_minmax(220px,262px)_92px_minmax(220px,262px)] gap-14 rounded-[10px] border-2 border-dotted border-[#333] px-6 py-5 max-lg:grid-cols-[88px_1fr_56px_1fr] max-lg:gap-6 max-md:grid-cols-1 max-md:gap-4;
+  }
+
+  .daily-task-editor-time-card {
+    @apply flex h-[172px] flex-col items-center justify-center rounded-[20px] border border-black bg-white px-5 text-center max-md:h-[132px];
+  }
+
+  .daily-task-editor-date-label {
+    @apply block whitespace-nowrap text-[26px] font-black leading-none text-black max-md:text-xl;
+  }
+
+  .daily-task-editor-time-card strong {
+    @apply mt-7 text-[32px] font-black leading-none text-black max-md:mt-5 max-md:text-2xl;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .daily-task-editor-actions {
+    @apply ml-auto flex w-[366px] max-w-full flex-col gap-5 max-md:w-full;
+  }
+
+  .daily-task-save-next,
+  .daily-task-editor-save,
+  .daily-task-editor-cancel {
+    @apply h-14 cursor-pointer whitespace-nowrap rounded-full border-0 px-8 text-[28px] font-bold leading-none transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:translate-y-0 max-md:text-lg;
+  }
+
+  .daily-task-save-next {
+    @apply w-full bg-[#8f8f8f] text-white hover:bg-[#7f7f7f];
+  }
+
+  .daily-task-editor-action-row {
+    @apply grid gap-5;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  .daily-task-editor-save {
+    @apply bg-[#8f8f8f] text-white hover:bg-[#7f7f7f];
+  }
+
+  .daily-task-editor-cancel {
+    @apply bg-[#d2d2d2] text-[#8f8f8f] hover:bg-[#c6c6c6] hover:text-[#666];
   }
 
   .daily-task-list-view {
@@ -1551,12 +2235,89 @@
     font-style: normal !important;
   }
 
+  .password-toggle {
+    @apply mr-2 flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-full border-0 bg-transparent text-[#8a7a6b] transition-colors hover:bg-[#f2eee9] hover:text-brown focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brown max-md:size-9;
+  }
+
+  .password-toggle svg {
+    @apply size-5;
+    stroke: currentColor;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .login-options {
+    @apply mb-5 flex w-full max-w-[550px] items-center justify-between gap-4 max-md:flex-col max-md:items-stretch;
+  }
+
+  .remember-me {
+    @apply flex cursor-pointer items-center gap-2 text-sm font-bold text-[#dcedc8] transition hover:text-white;
+  }
+
+  .remember-me input {
+    @apply size-4 cursor-pointer rounded border border-white/70 bg-white/90 accent-[#a67c52] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white;
+  }
+
   .forgot-password {
-    @apply mb-5 w-full max-w-[550px] text-right max-md:text-center;
+    @apply text-right max-md:text-center;
   }
 
   .forgot-password a {
     @apply py-1.5 text-sm font-medium text-[#dcedc8] no-underline transition hover:text-white hover:underline;
+  }
+
+  .forgot-password-page {
+    @apply flex min-h-screen w-screen items-center justify-center bg-[length:100%_100%] bg-no-repeat px-5 py-10;
+    background-image: var(--auth-background-image);
+  }
+
+  .forgot-password-panel {
+    @apply flex w-full max-w-[620px] flex-col rounded-lg bg-white px-8 py-8 shadow-[0_18px_48px_rgba(0,0,0,0.2)] max-md:px-5;
+  }
+
+  .forgot-password-header {
+    @apply mb-7 flex items-center justify-between gap-4 max-md:flex-col max-md:items-start;
+  }
+
+  .forgot-password-header h1 {
+    @apply text-3xl font-bold leading-tight text-brown max-md:text-2xl;
+  }
+
+  .forgot-password-back {
+    @apply rounded-full px-4 py-2 text-sm font-bold text-nav no-underline transition hover:bg-[#f4efea] hover:text-brown focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brown;
+  }
+
+  .forgot-password-field {
+    @apply flex min-h-[68px] items-center rounded-full bg-[#f8f6f3] py-2 pl-7 pr-4 max-md:flex-col max-md:items-start max-md:rounded-2xl max-md:px-4;
+  }
+
+  .forgot-password-field label {
+    @apply w-[130px] shrink-0 text-base font-semibold text-[#333333] max-md:mb-2 max-md:w-auto;
+  }
+
+  .forgot-password-field input {
+    @apply min-w-0 flex-1 rounded-xl border border-[#cccccc] bg-white px-[15px] py-3 text-base outline-none transition focus:border-[#a67c52] focus:ring-2 focus:ring-[#a67c52]/20 max-md:w-full;
+  }
+
+  .forgot-password-error {
+    @apply mt-3 text-right text-sm font-bold text-red-600;
+  }
+
+  .forgot-password-submit {
+    @apply mt-7 h-14 cursor-pointer rounded-lg border-0 bg-[#a67c52] px-8 text-lg font-semibold text-white shadow-[0_4px_15px_rgba(0,0,0,0.1)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-nav hover:shadow-[0_6px_20px_rgba(0,0,0,0.15)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0;
+  }
+
+  .forgot-password-status {
+    @apply mt-5 text-center text-sm font-bold;
+  }
+
+  .forgot-password-status-error {
+    @apply text-red-600;
+  }
+
+  .forgot-password-status-success {
+    @apply text-brown;
   }
 
   .login-actions {
@@ -1594,7 +2355,7 @@
   }
 
   .reg-btn {
-    @apply mt-2.5 w-full max-w-[400px] cursor-pointer rounded-lg border-0 bg-[#a67c52] px-10 py-4 text-lg font-semibold text-white shadow-[0_4px_15px_rgba(0,0,0,0.1)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-nav hover:shadow-[0_6px_20px_rgba(0,0,0,0.15)];
+    @apply mt-2.5 w-full max-w-[400px] cursor-pointer rounded-lg border-0 bg-[#a67c52] px-10 py-4 text-lg font-semibold text-white shadow-[0_4px_15px_rgba(0,0,0,0.1)] transition-all duration-300 hover:-translate-y-0.5 hover:bg-nav hover:shadow-[0_6px_20px_rgba(0,0,0,0.15)] disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0;
   }
 
   .explore-sidebar {
@@ -1878,6 +2639,18 @@
       opacity: 1;
       transform: translateY(0) scale(1);
       filter: blur(0);
+    }
+  }
+
+  @keyframes taskNoteIn {
+    0% {
+      opacity: 0;
+      transform: translate(-4px, -50%);
+    }
+
+    100% {
+      opacity: 1;
+      transform: translate(0, -50%);
     }
   }
 

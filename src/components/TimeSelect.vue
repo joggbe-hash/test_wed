@@ -23,7 +23,7 @@ function openTimePicker() {
 </script>
 
 <template>
-  <label class="schedule-field" @click="openTimePicker">
+  <label class="schedule-field">
     <span>{{ label }}</span>
     <input ref="timeInput" v-model="model" type="time" @focus="openTimePicker">
   </label>

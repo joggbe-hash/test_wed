@@ -1,7 +1,8 @@
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { getLocalTodayKey } from '../utils/date'
 
 export type Priority = 'high' | 'medium' | 'low'
+export type TaskImportance = 1 | 2 | 3 | 4 | 5
 
 export interface TaskItem {
   id: number
@@ -9,7 +10,9 @@ export interface TaskItem {
   note?: string
   date: string
   time: string
+  endTime?: string
   priority: Priority
+  importance?: TaskImportance
   completed: boolean
   order: number
 }
@@ -19,6 +22,7 @@ export interface ReminderItem {
   title: string
   date: string
   time: string
+  endTime?: string
   note: string
 }
 
@@ -28,18 +32,30 @@ export const priorityMeta: Record<Priority, { label: string, rank: number }> = {
   low: { label: '低', rank: 3 },
 }
 
+export function priorityToImportance(priority: Priority): TaskImportance {
+  if (priority === 'high') return 5
+  if (priority === 'medium') return 3
+  return 1
+}
+
+export function taskImportanceCount(task: Pick<TaskItem, 'importance' | 'priority'>): TaskImportance {
+  return task.importance ?? priorityToImportance(task.priority)
+}
+
 interface StoredSchedule {
   tasks: TaskItem[]
   reminders: ReminderItem[]
 }
 
+type StoredTaskItem = Omit<TaskItem, 'importance'> & { importance?: TaskImportance | 0 }
+
 const scheduleStorageKey = 'type-wsp-schedule-mock'
 const today = getLocalTodayKey()
 
 const seedTasks: TaskItem[] = [
-  { id: 1, title: '完成專題流程圖', date: today, time: '09:30', priority: 'high', completed: false, order: 1 },
-  { id: 2, title: '整理貼文互動版面', date: today, time: '11:00', priority: 'high', completed: false, order: 2 },
-  { id: 3, title: '確認左側邊欄內容', date: today, time: '15:20', priority: 'medium', completed: true, order: 3 },
+  { id: 1, title: '完成專題流程圖', date: today, time: '09:30', priority: 'high', importance: 5, completed: false, order: 1 },
+  { id: 2, title: '整理貼文互動版面', date: today, time: '11:00', priority: 'high', importance: 5, completed: false, order: 2 },
+  { id: 3, title: '確認左側邊欄內容', date: today, time: '15:20', priority: 'medium', importance: 3, completed: true, order: 3 },
 ]
 
 const seedReminders: ReminderItem[] = [
@@ -59,16 +75,35 @@ function isPriority(value: unknown): value is Priority {
   return value === 'high' || value === 'medium' || value === 'low'
 }
 
-function isTaskItem(value: unknown): value is TaskItem {
+function isStoredTaskImportance(value: unknown): value is TaskImportance | 0 {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 5
+}
+
+function normalizeTaskImportance(importance: TaskImportance | 0 | undefined, priority: Priority): TaskImportance {
+  if (importance === undefined) return priorityToImportance(priority)
+  if (importance === 0) return 1
+  return importance
+}
+
+function isTaskItem(value: unknown): value is StoredTaskItem {
   return isRecord(value) &&
     typeof value.id === 'number' &&
     typeof value.title === 'string' &&
     (value.note === undefined || typeof value.note === 'string') &&
     typeof value.date === 'string' &&
     typeof value.time === 'string' &&
+    (value.endTime === undefined || typeof value.endTime === 'string') &&
     isPriority(value.priority) &&
+    (value.importance === undefined || isStoredTaskImportance(value.importance)) &&
     typeof value.completed === 'boolean' &&
     typeof value.order === 'number'
+}
+
+function normalizeTaskItem(task: StoredTaskItem): TaskItem {
+  return {
+    ...task,
+    importance: normalizeTaskImportance(task.importance, task.priority),
+  }
 }
 
 function isReminderItem(value: unknown): value is ReminderItem {
@@ -77,6 +112,7 @@ function isReminderItem(value: unknown): value is ReminderItem {
     typeof value.title === 'string' &&
     typeof value.date === 'string' &&
     typeof value.time === 'string' &&
+    (value.endTime === undefined || typeof value.endTime === 'string') &&
     typeof value.note === 'string'
 }
 
@@ -92,7 +128,7 @@ function readStoredSchedule(): StoredSchedule | null {
       return null
     }
 
-    const storedTasks = parsedValue.tasks.filter(isTaskItem)
+    const storedTasks = parsedValue.tasks.filter(isTaskItem).map(normalizeTaskItem)
     const storedReminders = parsedValue.reminders.filter(isReminderItem)
     return {
       tasks: storedTasks,
@@ -108,10 +144,28 @@ function nextIdFrom<T extends { id: number }>(items: T[], fallback: number) {
 }
 
 const storedSchedule = readStoredSchedule()
+const todayKey = shallowRef(getLocalTodayKey())
 const tasks = ref<TaskItem[]>(storedSchedule?.tasks ?? seedTasks)
 const reminders = ref<ReminderItem[]>(storedSchedule?.reminders ?? seedReminders)
 let nextTaskId = nextIdFrom(tasks.value, 4)
 let nextReminderId = nextIdFrom(reminders.value, 3)
+let todayRefreshTimer: number | undefined
+
+function refreshTodayKey() {
+  todayKey.value = getLocalTodayKey()
+}
+
+if (typeof window !== 'undefined') {
+  todayRefreshTimer = window.setInterval(refreshTodayKey, 60_000)
+
+  if (import.meta.hot) {
+    import.meta.hot.dispose(() => {
+      if (todayRefreshTimer !== undefined) {
+        window.clearInterval(todayRefreshTimer)
+      }
+    })
+  }
+}
 
 function persistSchedule() {
   if (!hasLocalStorage()) return
@@ -133,8 +187,16 @@ const sortedTasks = computed(() =>
   }),
 )
 
+const todayTasks = computed(() =>
+  sortedTasks.value.filter((task) => task.date === todayKey.value),
+)
+
 const sortedReminders = computed(() =>
   [...reminders.value].sort((a, b) => `${a.date} ${a.time}`.localeCompare(`${b.date} ${b.time}`)),
+)
+
+const todayReminders = computed(() =>
+  sortedReminders.value.filter((reminder) => reminder.date === todayKey.value),
 )
 
 export function useScheduleMock() {
@@ -226,8 +288,11 @@ export function useScheduleMock() {
   return {
     tasks,
     reminders,
+    todayKey,
     sortedTasks,
+    todayTasks,
     sortedReminders,
+    todayReminders,
     addTask,
     addReminder,
     updateTask,
