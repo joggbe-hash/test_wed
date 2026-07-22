@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
+	"net/url"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -19,27 +21,32 @@ var (
 func InitDB(cfg *Config) {
 	var err error
 
-	userDSN := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		cfg.PostgresUser, cfg.PostgresPassword,
-		cfg.PostgresHost, cfg.PostgresPort, cfg.DBUser,
-	)
+	userDSN := postgresDSN(cfg, cfg.DBUser)
 	userPool, err = pgxpool.New(context.Background(), userDSN)
 	if err != nil {
 		log.Fatalf("connect user_db failed: %v", err)
 	}
 
-	systemDSN := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		cfg.PostgresUser, cfg.PostgresPassword,
-		cfg.PostgresHost, cfg.PostgresPort, cfg.DBSystem,
-	)
+	systemDSN := postgresDSN(cfg, cfg.DBSystem)
 	systemPool, err = pgxpool.New(context.Background(), systemDSN)
 	if err != nil {
 		log.Fatalf("connect system_db failed: %v", err)
 	}
 
 	log.Println("PostgreSQL pools initialized")
+}
+
+func postgresDSN(cfg *Config, database string) string {
+	dsn := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(cfg.PostgresUser, cfg.PostgresPassword),
+		Host:   net.JoinHostPort(cfg.PostgresHost, cfg.PostgresPort),
+		Path:   database,
+	}
+	query := dsn.Query()
+	query.Set("sslmode", cfg.PostgresSSLMode)
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
 }
 
 func CloseDB() {

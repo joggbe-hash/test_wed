@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -35,7 +36,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="navbar">
-    <div class="nav-logo" @click="router.push('/home')"></div>
+    <RouterLink to="/home" class="nav-logo" aria-label="回到首頁" />
 
     <form class="nav-search-form" role="search" @submit.prevent="submitNavSearch">
       <svg class="nav-search-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -52,25 +53,23 @@ onBeforeUnmount(() => {
     </form>
 
     <div class="nav-actions">
-      <button
-        type="button"
+      <RouterLink
+        to="/personal"
         class="top-nav-icon top-nav-profile"
         aria-label="個人"
         title="個人"
-        @click="router.push('/personal')"
       >
         <span class="material-symbols-outlined" aria-hidden="true">account_circle</span>
-      </button>
+      </RouterLink>
 
-      <button
-        type="button"
+      <RouterLink
+        to="/explore"
         class="top-nav-icon top-nav-search"
         aria-label="探索"
         title="探索"
-        @click="router.push('/explore')"
       >
         <span class="material-symbols-outlined" aria-hidden="true">explore</span>
-      </button>
+      </RouterLink>
 
       <button
         type="button"
@@ -81,15 +80,14 @@ onBeforeUnmount(() => {
         <span class="material-symbols-outlined" aria-hidden="true">notifications</span>
       </button>
 
-      <button
-        type="button"
+      <RouterLink
+        to="/freq"
         class="nav-time"
         aria-label="現在時間"
         title="現在時間"
-        @click="router.push('/freq')"
       >
         {{ currentTime }}
-      </button>
+      </RouterLink>
     </div>
   </div>
 </template>

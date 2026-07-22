@@ -13,9 +13,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
 )
 
 const sessionPrefix = "sess:"
+
+var errInvalidSession = errors.New("invalid session")
 
 var (
 	sessionSecret []byte
@@ -49,7 +52,7 @@ func signSID(sid string) string {
 func verifySID(signed string) (string, error) {
 	parts := strings.SplitN(signed, ".", 2)
 	if len(parts) != 2 {
-		return "", errors.New("invalid session format")
+		return "", fmt.Errorf("%w: invalid format", errInvalidSession)
 	}
 	sid, sig := parts[0], parts[1]
 
@@ -58,7 +61,7 @@ func verifySID(signed string) (string, error) {
 	expected := hex.EncodeToString(mac.Sum(nil))
 
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		return "", errors.New("invalid session signature")
+		return "", fmt.Errorf("%w: invalid signature", errInvalidSession)
 	}
 	return sid, nil
 }
@@ -86,8 +89,11 @@ func LoadSession(ctx context.Context, signed string) (*User, error) {
 		return nil, err
 	}
 	data, err := rdb.Get(ctx, sessionPrefix+sid).Bytes()
+	if errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("%w: expired or not found", errInvalidSession)
+	}
 	if err != nil {
-		return nil, errors.New("session expired or not found")
+		return nil, fmt.Errorf("load session failed: %w", err)
 	}
 	var user User
 	if err := json.Unmarshal(data, &user); err != nil {
@@ -95,6 +101,8 @@ func LoadSession(ctx context.Context, signed string) (*User, error) {
 	}
 	return &user, nil
 }
+
+type sessionLoader func(context.Context, string) (*User, error)
 
 func DestroySession(ctx context.Context, signed string) {
 	sid, err := verifySID(signed)
@@ -104,17 +112,26 @@ func DestroySession(ctx context.Context, signed string) {
 	rdb.Del(ctx, sessionPrefix+sid)
 }
 
-// requireAuth 是需要登入的 handler middleware，驗證成功後把 User 放進 context。
-func requireAuth(next http.HandlerFunc) http.HandlerFunc {
+// requireAuthWithLoader 是需要登入的 handler middleware，驗證成功後把 User 放進 context。
+func requireAuthWithLoader(next http.HandlerFunc, loadSession sessionLoader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("session")
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, M{"error": "unauthorized"})
 			return
 		}
-		user, err := LoadSession(r.Context(), cookie.Value)
+		user, err := loadSession(r.Context(), cookie.Value)
 		if err != nil {
-			writeJSON(w, http.StatusUnauthorized, M{"error": "invalid session"})
+			if errors.Is(err, errInvalidSession) {
+				writeJSON(w, http.StatusUnauthorized, M{"error": "invalid session"})
+				return
+			}
+
+			writeJSON(w, http.StatusServiceUnavailable, M{"error": "session service unavailable"})
+			return
+		}
+		if user == nil {
+			writeJSON(w, http.StatusServiceUnavailable, M{"error": "session service unavailable"})
 			return
 		}
 

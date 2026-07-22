@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import AddTaskModal from './AddTaskModal.vue'
 import DateScheduleModal from './DateScheduleModal.vue'
 import InspirationListModal from './InspirationListModal.vue'
 import TaskDeleteConfirmDialog from './TaskDeleteConfirmDialog.vue'
+import SidebarReminderPanel from './SidebarReminderPanel.vue'
+import SidebarTaskPanel from './SidebarTaskPanel.vue'
 import { type ReminderItem, type TaskItem, useScheduleMock } from '../composables/useScheduleMock'
 
 const weekDays = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT']
@@ -11,31 +13,46 @@ const currentDate = shallowRef(new Date())
 const visibleMonth = shallowRef(new Date(currentDate.value.getFullYear(), currentDate.value.getMonth(), 1))
 const selectedDateKey = ref<string | null>(null)
 const isAddTaskModalOpen = shallowRef(false)
+const isAddReminderModalOpen = shallowRef(false)
 const isInspirationListOpen = shallowRef(false)
 const isReminderListExpanded = shallowRef(false)
 const isTaskListExpanded = shallowRef(false)
 const openTaskMenuId = shallowRef<number | null>(null)
+const openReminderMenuId = shallowRef<number | null>(null)
 const taskMenuTop = shallowRef(0)
 const taskMenuLeft = shallowRef(0)
 const editingTaskId = shallowRef<number | null>(null)
+const editingReminderId = shallowRef<number | null>(null)
 const pendingDeleteTask = shallowRef<TaskItem | null>(null)
+const pendingDeleteReminder = shallowRef<ReminderItem | null>(null)
 const activeReminderNoteId = shallowRef<number | null>(null)
 const activeReminderNoteTop = shallowRef(0)
 const activeReminderNoteLeft = shallowRef(0)
 const activeTaskNoteId = shallowRef<number | null>(null)
 const activeTaskNoteTop = shallowRef(0)
 const activeTaskNoteLeft = shallowRef(0)
-const { todayKey, todayTasks, todayReminders, toggleTask, deleteTask } = useScheduleMock()
+const {
+  todayKey,
+  todayTasks,
+  todayReminders,
+  toggleTask,
+  deleteTask,
+  deleteReminder,
+} = useScheduleMock()
 
-const reminderListId = 'sidebar-reminder-list'
-const taskListId = 'sidebar-task-list'
+const reminderPanelHeadingId = 'sidebar-reminder-heading'
+const taskPanelHeadingId = 'sidebar-task-heading'
 const sidebarReminders = computed(() => todayReminders.value)
 const sidebarTasks = computed(() => todayTasks.value)
 const activeReminderNote = computed(() => {
+  if (openReminderMenuId.value !== null) return ''
+
   const reminder = sidebarReminders.value.find((item) => item.id === activeReminderNoteId.value)
   return reminder?.note?.trim() ?? ''
 })
 const activeTaskNote = computed(() => {
+  if (openTaskMenuId.value !== null) return ''
+
   const task = sidebarTasks.value.find((item) => item.id === activeTaskNoteId.value)
   return task?.note?.trim() ?? ''
 })
@@ -113,19 +130,29 @@ function setSelectedDateKey(dateKey: string | null) {
 
 function openDateSchedule(dateKey: string) {
   if (!dateKey) return
+  isAddReminderModalOpen.value = false
+  editingReminderId.value = null
   setSelectedDateKey(dateKey)
 }
 
-function taskCheckboxId(taskId: number) {
-  return `sidebar-task-${taskId}`
+function openTodayReminderForm() {
+  isAddReminderModalOpen.value = true
+  editingReminderId.value = null
+  setSelectedDateKey(todayKey.value)
 }
 
-function taskMenuId(taskId: number) {
-  return `sidebar-task-menu-${taskId}`
+function closeDateSchedule() {
+  isAddReminderModalOpen.value = false
+  editingReminderId.value = null
+  setSelectedDateKey(null)
 }
 
-function reminderTimeRange(reminder: ReminderItem) {
-  return reminder.endTime ? `${reminder.time} - ${reminder.endTime}` : reminder.time
+function taskMenuTriggerId(taskId: number) {
+  return `sidebar-task-menu-trigger-${taskId}`
+}
+
+function reminderMenuTriggerId(reminderId: number) {
+  return `sidebar-reminder-menu-trigger-${reminderId}`
 }
 
 function previewPosition(row: HTMLElement, text: string) {
@@ -219,6 +246,20 @@ function handleTaskFocusOut(event: FocusEvent, taskId: number) {
 
 function closeTaskMenu() {
   openTaskMenuId.value = null
+  openReminderMenuId.value = null
+}
+
+function closeTaskMenuAndRestoreFocus() {
+  const triggerId = openTaskMenuId.value !== null
+    ? taskMenuTriggerId(openTaskMenuId.value)
+    : openReminderMenuId.value !== null
+      ? reminderMenuTriggerId(openReminderMenuId.value)
+      : null
+
+  closeTaskMenu()
+  if (!triggerId) return
+
+  void nextTick(() => document.getElementById(triggerId)?.focus())
 }
 
 function updateTaskMenuPosition(trigger: HTMLElement) {
@@ -227,15 +268,33 @@ function updateTaskMenuPosition(trigger: HTMLElement) {
   const menuHeight = 76
   const gap = 6
   const viewportPadding = 8
-  const shouldOpenAbove = rect.bottom + gap + menuHeight > window.innerHeight - viewportPadding
-
-  taskMenuTop.value = shouldOpenAbove
-    ? Math.max(viewportPadding, rect.top - gap - menuHeight)
-    : Math.min(rect.bottom + gap, window.innerHeight - viewportPadding - menuHeight)
-  taskMenuLeft.value = Math.max(
+  const container = trigger.closest<HTMLElement>('.sidebar-panel')
+  const containerRect = container?.getBoundingClientRect()
+  const boundaryLeft = Math.max(
     viewportPadding,
-    Math.min(rect.right - menuWidth, window.innerWidth - viewportPadding - menuWidth),
+    (containerRect?.left ?? viewportPadding) + 4,
   )
+  const boundaryRight = Math.min(
+    window.innerWidth - viewportPadding,
+    (containerRect?.right ?? window.innerWidth - viewportPadding) - 4,
+  )
+  const preferredLeft = rect.right + gap
+  const fallbackLeft = rect.left - gap - menuWidth
+  const hasRightSpace = preferredLeft + menuWidth <= boundaryRight
+  const hasLeftSpace = fallbackLeft >= boundaryLeft
+
+  taskMenuTop.value = Math.max(
+    viewportPadding,
+    Math.min(
+      rect.top + rect.height / 2 - menuHeight / 2,
+      window.innerHeight - viewportPadding - menuHeight,
+    ),
+  )
+  taskMenuLeft.value = hasRightSpace
+    ? preferredLeft
+    : hasLeftSpace
+      ? fallbackLeft
+      : Math.max(boundaryLeft, boundaryRight - menuWidth)
 }
 
 function toggleTaskMenu(taskId: number, event: MouseEvent) {
@@ -250,7 +309,24 @@ function toggleTaskMenu(taskId: number, event: MouseEvent) {
   }
 
   activeTaskNoteId.value = null
+  openReminderMenuId.value = null
   openTaskMenuId.value = taskId
+}
+
+function toggleReminderMenu(reminderId: number, event: MouseEvent) {
+  if (openReminderMenuId.value === reminderId) {
+    closeTaskMenu()
+    return
+  }
+
+  const trigger = event.currentTarget
+  if (trigger instanceof HTMLElement) {
+    updateTaskMenuPosition(trigger)
+  }
+
+  activeReminderNoteId.value = null
+  openTaskMenuId.value = null
+  openReminderMenuId.value = reminderId
 }
 
 function toggleTaskListExpansion() {
@@ -289,6 +365,31 @@ function confirmDeleteTask() {
 
   deleteTask(task.id)
   pendingDeleteTask.value = null
+}
+
+function removeSidebarReminder(reminder: ReminderItem) {
+  closeTaskMenu()
+  activeReminderNoteId.value = null
+  pendingDeleteReminder.value = reminder
+}
+
+function editSidebarReminder(reminder: ReminderItem) {
+  closeTaskMenu()
+  isAddReminderModalOpen.value = false
+  editingReminderId.value = reminder.id
+  setSelectedDateKey(reminder.date)
+}
+
+function closeReminderDeleteDialog() {
+  pendingDeleteReminder.value = null
+}
+
+function confirmDeleteReminder() {
+  const reminder = pendingDeleteReminder.value
+  if (!reminder) return
+
+  deleteReminder(reminder.id)
+  pendingDeleteReminder.value = null
 }
 
 function refreshCurrentDate() {
@@ -356,132 +457,42 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <section class="sidebar-panel reminder-panel">
-      <button
-        type="button"
-        class="sidebar-panel-heading"
-        :aria-expanded="isReminderListExpanded"
-        :aria-controls="reminderListId"
-        :aria-label="isReminderListExpanded ? '收合今日提醒清單' : '展開今日提醒清單'"
-        @click="toggleReminderListExpansion"
-      >
-        今日提醒
-      </button>
-      <div
-        :id="reminderListId"
-        class="task-list sidebar-reminder-list"
-        :class="{ 'task-list-expanded': isReminderListExpanded }"
-      >
-        <div
-          v-if="sidebarReminders.length === 0"
-          class="task-row sidebar-reminder-row sidebar-reminder-empty"
-        >
-          <span class="sidebar-reminder-title">:p</span>
-        </div>
-        <template v-else>
-          <div
-            v-for="reminder in sidebarReminders"
-            :key="reminder.id"
-            class="task-row sidebar-reminder-row"
-            :tabindex="reminder.note.trim() ? 0 : undefined"
-            @mouseenter="showReminderNote(reminder, $event)"
-            @mouseleave="hideReminderNote(reminder.id)"
-            @focusin="showReminderNote(reminder, $event)"
-            @focusout="handleReminderFocusOut($event, reminder.id)"
-          >
-            <span class="sidebar-reminder-time" :title="reminderTimeRange(reminder)">
-              {{ reminderTimeRange(reminder) }}
-            </span>
-            <span class="sidebar-reminder-title" :title="reminder.title">
-              {{ reminder.title }}
-            </span>
-          </div>
-        </template>
-      </div>
-      <div
-        v-if="activeReminderNote"
-        class="task-note-preview"
-        :style="activeReminderNoteStyle"
-        role="tooltip"
-        aria-live="polite"
-      >
-        {{ activeReminderNote }}
-      </div>
-    </section>
+    <SidebarReminderPanel
+      :reminders="sidebarReminders"
+      :expanded="isReminderListExpanded"
+      :open-menu-id="openReminderMenuId"
+      :menu-style="taskMenuStyle"
+      :active-note="activeReminderNote"
+      :active-note-style="activeReminderNoteStyle"
+      @toggle-expansion="toggleReminderListExpansion"
+      @add="openTodayReminderForm"
+      @show-note="showReminderNote"
+      @hide-note="hideReminderNote"
+      @focus-out="handleReminderFocusOut"
+      @toggle-menu="toggleReminderMenu"
+      @close-menu="closeTaskMenuAndRestoreFocus"
+      @edit="editSidebarReminder"
+      @remove="removeSidebarReminder"
+    />
 
-    <section class="sidebar-panel task-panel">
-      <button
-        type="button"
-        class="sidebar-panel-heading"
-        :aria-expanded="isTaskListExpanded"
-        :aria-controls="taskListId"
-        :aria-label="isTaskListExpanded ? '收合今日任務清單' : '展開今日任務清單'"
-        @click="toggleTaskListExpansion"
-      >
-        今日任務
-      </button>
-      <div
-        :id="taskListId"
-        class="task-list"
-        :class="{ 'task-list-expanded': isTaskListExpanded }"
-      >
-        <div
-          v-for="task in sidebarTasks"
-          :key="task.id"
-          class="task-row"
-          @mouseenter="showTaskNote(task, $event)"
-          @mouseleave="hideTaskNote(task.id)"
-          @focusin="showTaskNote(task, $event)"
-          @focusout="handleTaskFocusOut($event, task.id)"
-        >
-          <input
-            :id="taskCheckboxId(task.id)"
-            type="checkbox"
-            :checked="task.completed"
-            :aria-label="`${task.title} 完成狀態`"
-            @change="toggleTask(task.id)"
-          >
-          <label class="task-row-title" :for="taskCheckboxId(task.id)" :title="task.title">
-            {{ task.title }}
-          </label>
-          <div class="task-row-actions" @click.stop>
-            <button
-              type="button"
-              class="task-menu-trigger"
-              :aria-label="`${task.title} 更多操作`"
-              aria-haspopup="menu"
-              :aria-expanded="openTaskMenuId === task.id"
-              :aria-controls="taskMenuId(task.id)"
-              @click="toggleTaskMenu(task.id, $event)"
-              @keydown.escape.stop.prevent="closeTaskMenu"
-            >
-              <span aria-hidden="true">⋮</span>
-            </button>
-            <div
-              v-if="openTaskMenuId === task.id"
-              :id="taskMenuId(task.id)"
-              class="task-menu-panel"
-              :style="taskMenuStyle"
-              role="menu"
-              @keydown.escape.stop.prevent="closeTaskMenu"
-            >
-              <button type="button" role="menuitem" @click="editSidebarTask(task)">編輯</button>
-              <button type="button" role="menuitem" @click="removeSidebarTask(task)">刪除</button>
-            </div>
-          </div>
-        </div>
-      </div>
-      <div
-        v-if="activeTaskNote"
-        class="task-note-preview"
-        :style="activeTaskNoteStyle"
-        role="tooltip"
-        aria-live="polite"
-      >
-        {{ activeTaskNote }}
-      </div>
-      <button type="button" class="add-task-btn" @click="isAddTaskModalOpen = true">+新增任務</button>
-    </section>
+    <SidebarTaskPanel
+      :tasks="sidebarTasks"
+      :expanded="isTaskListExpanded"
+      :open-menu-id="openTaskMenuId"
+      :menu-style="taskMenuStyle"
+      :active-note="activeTaskNote"
+      :active-note-style="activeTaskNoteStyle"
+      @toggle-expansion="toggleTaskListExpansion"
+      @add="isAddTaskModalOpen = true"
+      @toggle-task="toggleTask"
+      @show-note="showTaskNote"
+      @hide-note="hideTaskNote"
+      @focus-out="handleTaskFocusOut"
+      @toggle-menu="toggleTaskMenu"
+      @close-menu="closeTaskMenuAndRestoreFocus"
+      @edit="editSidebarTask"
+      @remove="removeSidebarTask"
+    />
 
     <button type="button" class="sidebar-panel note-panel" @click="isInspirationListOpen = true">
       記下想做的事
@@ -490,8 +501,10 @@ onBeforeUnmount(() => {
     <DateScheduleModal
       v-if="selectedDateKey"
       :date-key="selectedDateKey"
+      :start-with-new-reminder="isAddReminderModalOpen"
+      :edit-reminder-id="editingReminderId"
       @update:date-key="setSelectedDateKey"
-      @close="setSelectedDateKey(null)"
+      @close="closeDateSchedule"
     />
 
     <AddTaskModal v-if="isAddTaskModalOpen" @close="isAddTaskModalOpen = false" />
@@ -503,9 +516,20 @@ onBeforeUnmount(() => {
     <InspirationListModal v-if="isInspirationListOpen" @close="isInspirationListOpen = false" />
     <TaskDeleteConfirmDialog
       v-if="pendingDeleteTask"
-      :task="pendingDeleteTask"
+      :item="pendingDeleteTask"
+      :return-focus-id="taskMenuTriggerId(pendingDeleteTask.id)"
+      :confirm-focus-id="taskPanelHeadingId"
       @cancel="closeDeleteDialog"
       @confirm="confirmDeleteTask"
+    />
+    <TaskDeleteConfirmDialog
+      v-if="pendingDeleteReminder"
+      :item="pendingDeleteReminder"
+      kind="reminder"
+      :return-focus-id="reminderMenuTriggerId(pendingDeleteReminder.id)"
+      :confirm-focus-id="reminderPanelHeadingId"
+      @cancel="closeReminderDeleteDialog"
+      @confirm="confirmDeleteReminder"
     />
   </aside>
 </template>

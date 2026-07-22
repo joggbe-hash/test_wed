@@ -19,7 +19,11 @@ const emit = defineEmits<{
 }>()
 
 const importanceOptions: Importance[] = [1, 2, 3, 4, 5]
-const { addTask, sortedTasks, updateTask } = useScheduleMock()
+const {
+  addTask,
+  sortedTasks,
+  updateTask,
+} = useScheduleMock()
 
 const form = reactive({
   title: '',
@@ -76,7 +80,7 @@ function saveTask() {
     })
   }
 
-  addTask({
+  return addTask({
     title,
     note: form.note.trim(),
     date: getLocalTodayKey(),
@@ -84,8 +88,6 @@ function saveTask() {
     priority: toPriority(form.importance),
     importance: form.importance,
   })
-
-  return true
 }
 
 function saveAndClose() {

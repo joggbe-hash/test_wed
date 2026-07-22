@@ -35,4 +35,4 @@ CREATE TABLE posts (
 );
 
 -- 按時間倒序索引，加速 feed 查詢
-CREATE INDEX idx_posts_created_at ON posts (created_at DESC);
+CREATE INDEX idx_posts_feed_cursor ON posts (created_at DESC, id DESC);

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, shallowRef, onMounted, onUnmounted, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, shallowRef, useTemplateRef, watch } from 'vue'
 import {
   markDailyTaskPromptHandled,
 } from '../composables/useDailyTaskPrompt'
@@ -37,8 +37,14 @@ const form = reactive({
   endTime: '09:00',
 })
 const hoverImportance = shallowRef<Importance | null>(null)
+const dialogPanel = useTemplateRef<HTMLElement>('dailyTaskDialog')
+const titleInput = useTemplateRef<HTMLInputElement>('dailyTitleInput')
+const listAddButton = useTemplateRef<HTMLButtonElement>('dailyListAddButton')
 const startTimeInput = useTemplateRef<HTMLInputElement>('dailyStartTimeInput')
 const endTimeInput = useTemplateRef<HTMLInputElement>('dailyEndTimeInput')
+let previousActiveElement = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+  ? document.activeElement
+  : null
 
 const canSubmit = computed(() => form.title.trim().length > 0)
 const displayedImportance = computed(() => hoverImportance.value ?? form.importance)
@@ -58,6 +64,79 @@ const todayTasks = computed(() =>
   sortedTasks.value.filter((task) => task.date === promptTaskDate.value),
 )
 const shouldEmitClose = computed(() => isEditMode.value || Boolean(props.taskDate) || Boolean(props.closeAfterSubmit))
+
+const focusableSelector = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ')
+
+function focusWithoutScroll(element: HTMLElement | null) {
+  if (!element || !element.isConnected || element === document.body) return
+  element.focus({ preventScroll: true })
+}
+
+function focusCurrentView() {
+  void nextTick(() => {
+    focusWithoutScroll(mode.value === 'list' ? listAddButton.value : titleInput.value)
+  })
+}
+
+function getFocusableElements() {
+  const panel = dialogPanel.value
+  if (!panel) return []
+
+  return Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector))
+    .filter((element) => element.getClientRects().length > 0)
+}
+
+function trapDialogFocus(event: KeyboardEvent) {
+  const panel = dialogPanel.value
+  const focusableElements = getFocusableElements()
+  if (!panel || focusableElements.length === 0) {
+    event.preventDefault()
+    focusWithoutScroll(panel)
+    return
+  }
+
+  const firstElement = focusableElements[0]
+  const lastElement = focusableElements[focusableElements.length - 1]
+  const activeElement = document.activeElement
+
+  if (!(activeElement instanceof Node) || !panel.contains(activeElement)) {
+    event.preventDefault()
+    focusWithoutScroll(event.shiftKey ? lastElement : firstElement)
+    return
+  }
+
+  if (event.shiftKey && activeElement === firstElement) {
+    event.preventDefault()
+    focusWithoutScroll(lastElement)
+    return
+  }
+
+  if (!event.shiftKey && activeElement === lastElement) {
+    event.preventDefault()
+    focusWithoutScroll(firstElement)
+  }
+}
+
+function resolveReturnFocus() {
+  if (
+    previousActiveElement?.isConnected &&
+    previousActiveElement !== document.body &&
+    !previousActiveElement.closest('[inert]')
+  ) {
+    return previousActiveElement
+  }
+
+  return document.querySelector<HTMLElement>(
+    '.date-schedule-modal:not([aria-hidden="true"]) .date-schedule-close, [data-app-route-content]:not([aria-hidden="true"])',
+  )
+}
 
 function parseLocalDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split('-').map(Number)
@@ -166,7 +245,7 @@ function submitTask() {
       return
     }
 
-    updateTask(task.id, {
+    const saved = updateTask(task.id, {
       title,
       note: form.note.trim(),
       time: form.startTime,
@@ -174,11 +253,12 @@ function submitTask() {
       priority: toPriority(form.importance),
       importance: form.importance,
     })
+    if (!saved) return
     closePrompt()
     return
   }
 
-  addTaskFromForm(title)
+  if (!addTaskFromForm(title)) return
 
   if (isScheduleTaskEditor.value || props.closeAfterSubmit) {
     closePrompt()
@@ -190,7 +270,7 @@ function submitTask() {
 }
 
 function addTaskFromForm(title: string) {
-  addTask({
+  return addTask({
     title,
     note: form.note.trim(),
     date: promptTaskDate.value,
@@ -205,9 +285,10 @@ function saveTaskAndCreateNext() {
   const title = form.title.trim()
   if (!title || isEditMode.value) return
 
-  addTaskFromForm(title)
+  if (!addTaskFromForm(title)) return
   resetForm()
   mode.value = 'form'
+  focusCurrentView()
 }
 
 function openAddForm() {
@@ -236,6 +317,7 @@ function handleTaskCardWheel(event: WheelEvent) {
 
 const handleKeyDown = (e: KeyboardEvent) => {
   if (e.key === 'Escape') {
+    e.preventDefault()
     closePrompt()
   }
 }
@@ -265,8 +347,16 @@ watch(
   { immediate: true },
 )
 
+watch(mode, focusCurrentView, { flush: 'post' })
+
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
+  focusCurrentView()
+})
+
+onBeforeUnmount(() => {
+  focusWithoutScroll(resolveReturnFocus())
+  previousActiveElement = null
 })
 
 onUnmounted(() => {
@@ -282,6 +372,7 @@ onUnmounted(() => {
     role="presentation"
   >
     <section
+      ref="dailyTaskDialog"
       class="daily-task-modal"
       :class="{
         'daily-task-modal-list': mode === 'list',
@@ -290,6 +381,8 @@ onUnmounted(() => {
       role="dialog"
       aria-modal="true"
       aria-labelledby="daily-task-title"
+      tabindex="-1"
+      @keydown.tab="trapDialogFocus"
     >
       <template v-if="isScheduleTaskEditor">
         <div class="daily-task-editor-calendar-mark" aria-hidden="true">
@@ -308,10 +401,10 @@ onUnmounted(() => {
             <label class="daily-task-editor-field-label" for="daily-task-editor-title">標題：</label>
             <input
               id="daily-task-editor-title"
+              ref="dailyTitleInput"
               v-model="form.title"
               type="text"
               placeholder="作業、家事、購物清單..."
-              autofocus
             >
 
             <fieldset class="daily-task-importance daily-task-editor-importance" aria-label="重要度選擇">
@@ -392,7 +485,7 @@ onUnmounted(() => {
       <form v-if="mode === 'form'" class="daily-task-form" @submit.prevent="submitTask">
         <label class="daily-task-field">
           <span>任務標題：</span>
-          <input v-model="form.title" type="text" placeholder="作業、家事、購物清單..." autofocus>
+          <input ref="dailyTitleInput" v-model="form.title" type="text" placeholder="作業、家事、購物清單...">
         </label>
 
         <label class="daily-task-field daily-task-note-field">
@@ -453,7 +546,7 @@ onUnmounted(() => {
       </form>
 
       <div v-else class="daily-task-list-view">
-        <button type="button" class="daily-task-add-again" @click="openAddForm">新增任務 ＋</button>
+        <button ref="dailyListAddButton" type="button" class="daily-task-add-again" @click="openAddForm">新增任務 ＋</button>
 
         <section class="daily-task-list-panel" aria-label="今日任務清單">
           <header class="daily-task-list-header">

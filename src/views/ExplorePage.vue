@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import MainLayout from '../layouts/MainLayout.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import { fetchExploreData } from '../api/timedApi'
 import type { ExploreCategory, ExploreRow } from '../api/timedApi'
 
 const route = useRoute()
-const router = useRouter()
 const cleanupHandlers: Array<() => void> = []
 const isLoading = shallowRef(true)
+const loadErrorMessage = shallowRef('')
 const searchText = shallowRef('')
 const categories = ref<ExploreCategory[]>([])
 const rows = ref<ExploreRow[]>([])
@@ -99,12 +99,20 @@ function bindHorizontalScrollers() {
 onMounted(async () => {
   searchText.value = queryToText(route.query.q)
   isLoading.value = true
-  const response = await fetchExploreData()
-  categories.value = response.data.categories
-  rows.value = response.data.rows
-  isLoading.value = false
-  await nextTick()
-  bindHorizontalScrollers()
+  loadErrorMessage.value = ''
+  try {
+    const response = await fetchExploreData()
+    categories.value = response.data.categories
+    rows.value = response.data.rows
+    await nextTick()
+    bindHorizontalScrollers()
+  } catch (error) {
+    categories.value = []
+    rows.value = []
+    loadErrorMessage.value = error instanceof Error ? error.message : '探索資料載入失敗'
+  } finally {
+    isLoading.value = false
+  }
 })
 
 onBeforeUnmount(() => {
@@ -128,8 +136,15 @@ watch(filteredRows, async () => {
   <MainLayout active-nav="explore" sidebar-class="explore-sidebar" feed-class="explore-feed">
     <template #sidebar>
       <div class="sidebar-search">
-        <svg class="sidebar-search-icon" viewBox="0 0 24 24" fill="none" stroke="#7A7A7A" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-        <input v-model="searchText" type="text" class="sidebar-search-input" placeholder="">
+        <svg class="sidebar-search-icon" viewBox="0 0 24 24" fill="none" stroke="var(--color-muted)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+        <input
+          v-model="searchText"
+          type="search"
+          name="explore-search"
+          class="sidebar-search-input"
+          aria-label="搜尋探索內容"
+          autocomplete="off"
+        >
         <button
           v-if="searchText"
           type="button"
@@ -143,18 +158,22 @@ watch(filteredRows, async () => {
       <div class="grid-icons gap-x-[15px]">
         <div v-for="item in filteredCategories" :key="item.id" class="grid-item">
           <div class="grid-icon-circle"></div>
-          <div class="mt-[5px] text-sm text-[#333333]">{{ item.name }}</div>
+          <div class="mt-[5px] text-sm text-text-default">{{ item.name }}</div>
         </div>
       </div>
     </template>
 
     <LoadingPanel v-if="isLoading" />
 
+    <div v-else-if="loadErrorMessage" class="m-6 rounded-xl border border-red-300 bg-red-50 p-5 text-red-900" role="alert">
+      {{ loadErrorMessage }}
+    </div>
+
     <template v-else>
       <div v-for="row in filteredRows" :key="row.id" class="horizontal-scroller" :class="row.id === 1 ? 'mt-0' : 'mt-5'">
         <div v-for="card in row.cards" :key="card.id" class="explore-card">
           <div class="explore-header">
-            <div class="explore-avatar" @click="router.push('/personal')"></div>
+            <RouterLink to="/personal" class="explore-avatar" :aria-label="`查看 ${card.title} 的個人頁`" />
             <div class="explore-title-area">
               <div class="explore-title">{{ card.title }}</div>
               <div class="explore-tags">{{ card.tags }}</div>
@@ -166,7 +185,7 @@ watch(filteredRows, async () => {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
               <span>{{ card.members }}</span>
             </div>
-            <button class="post-action-btn-large" @click="router.push('/social')">進入</button>
+            <RouterLink to="/social" class="post-action-btn-large">進入</RouterLink>
           </div>
         </div>
       </div>

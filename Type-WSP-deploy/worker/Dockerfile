@@ -2,10 +2,11 @@ FROM golang:1-alpine AS builder
 
 WORKDIR /build
 
-COPY go.mod go.sum ./
+COPY shared /shared
+COPY worker/go.mod worker/go.sum ./
 RUN go mod download
 
-COPY . .
+COPY worker .
 RUN CGO_ENABLED=0 GOOS=linux go build -o /worker .
 
 FROM alpine:3.21

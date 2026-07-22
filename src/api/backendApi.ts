@@ -21,6 +21,10 @@ export interface FeedResponse {
   next_cursor: string
 }
 
+export interface CurrentSessionResponse {
+  user: User
+}
+
 export class ApiError extends Error {
   status: number
 
@@ -33,8 +37,16 @@ export class ApiError extends Error {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? ''
 
+interface ApiFetchOptions {
+  redirectOnUnauthorized?: boolean
+}
+
 // 前端所有後端請求都經過這裡，統一處理身分憑證、資料標頭、錯誤格式和未登入導回。
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function apiFetch<T>(
+  path: string,
+  init: RequestInit = {},
+  options: ApiFetchOptions = {},
+): Promise<T> {
   const response = await fetch(`${apiBaseUrl}${path}`, {
     ...init,
     credentials: 'include',
@@ -50,8 +62,12 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const data = text && isJson ? JSON.parse(text) : null
 
   if (!response.ok) {
-    if (response.status === 401) {
-      router.push('/login')
+    if (response.status === 401 && options.redirectOnUnauthorized !== false) {
+      const currentRoute = router.currentRoute.value
+      void router.push({
+        path: '/login',
+        query: currentRoute.path === '/login' ? {} : { redirect: currentRoute.fullPath },
+      })
     }
 
     throw new ApiError(
@@ -71,7 +87,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 export function sendVerificationCode(email: string) {
-  return apiFetch<{ message: string; debug_code?: string }>('/api/auth/send-code', {
+  return apiFetch<{ message: string }>('/api/auth/send-code', {
     method: 'POST',
     body: JSON.stringify({ email }),
   })
@@ -90,10 +106,22 @@ export function registerAccount(payload: {
 }
 
 export function loginAccount(email: string, password: string, remember = false) {
-  return apiFetch<{ user: User }>('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password, remember }),
-  })
+  return apiFetch<{ user: User }>(
+    '/api/auth/login',
+    {
+      method: 'POST',
+      body: JSON.stringify({ email, password, remember }),
+    },
+    { redirectOnUnauthorized: false },
+  )
+}
+
+export function checkCurrentSession() {
+  return apiFetch<CurrentSessionResponse>(
+    '/api/auth/session',
+    {},
+    { redirectOnUnauthorized: false },
+  )
 }
 
 export function logoutAccount() {

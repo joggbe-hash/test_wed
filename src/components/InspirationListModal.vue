@@ -1,14 +1,9 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch, onMounted, onUnmounted } from 'vue'
+import { computed, shallowRef, watch, onMounted, onUnmounted, useTemplateRef } from 'vue'
 import { formatLocalDateKey } from '../utils/date'
+import { useAccessibleDialog } from '../composables/useAccessibleDialog'
+import { useInspirationStore, type InspirationItem } from '../composables/useInspirationStore'
 import DailyTaskPrompt from './DailyTaskPrompt.vue'
-
-interface InspirationItem {
-  id: number
-  date: string
-  text: string
-  imageLabel?: string
-}
 
 type SortOrder = 'newest' | 'oldest'
 
@@ -16,19 +11,25 @@ const emit = defineEmits<{
   close: []
 }>()
 
+const { items, errorMessage, addItem, updateItem, deleteItem: persistDeleteItem } = useInspirationStore()
 const inspirationTextMaxLength = 700
 const searchText = shallowRef('')
 const draftText = shallowRef('')
 const editText = shallowRef('')
 const taskDraftTitle = shallowRef('')
 const isTaskPromptOpen = shallowRef(false)
-const nextId = shallowRef(6)
 const isDateFilterOpen = shallowRef(false)
-const defaultStartDate = '2026-06-18'
 const todayDateKey = shallowRef(formatLocalDateKey(new Date()))
-const [defaultStartYear, defaultStartMonth, defaultStartDay] = parseDateKey(defaultStartDate)
+const earliestAvailableDate = computed(() =>
+  items.value.reduce(
+    (earliest, item) => item.date < earliest ? item.date : earliest,
+    todayDateKey.value,
+  ),
+)
+const initialStartDate = earliestAvailableDate.value
+const [defaultStartYear, defaultStartMonth, defaultStartDay] = parseDateKey(initialStartDate)
 const [initialEndYear, initialEndMonth, initialEndDay] = parseDateKey(todayDateKey.value)
-const appliedStartDate = shallowRef(defaultStartDate)
+const appliedStartDate = shallowRef(initialStartDate)
 const appliedEndDate = shallowRef(todayDateKey.value)
 const appliedSortOrder = shallowRef<SortOrder>('newest')
 const pendingStartMonth = shallowRef(defaultStartMonth)
@@ -40,29 +41,8 @@ const pendingEndYear = shallowRef(initialEndYear)
 const pendingSortOrder = shallowRef<SortOrder>('newest')
 const pendingDeleteItemId = shallowRef<number | null>(null)
 const editingItemId = shallowRef<number | null>(null)
-const items = ref<InspirationItem[]>([
-  {
-    id: 1,
-    date: '2026-06-25',
-    text: '去租書店把柯南漫畫裡的壞人都圈出來 *要帶紅筆',
-  },
-  {
-    id: 2,
-    date: '2026-06-24',
-    text: '舉辦吃麻糬大賽可以解決人口老化問題',
-  },
-  {
-    id: 3,
-    date: '2026-06-24',
-    text: '蛇的尿道跟肛門是同一個，尿液結晶有時會導致出口堵塞',
-    imageLabel: '某貼文縮圖連結',
-  },
-  {
-    id: 4,
-    date: '2026-06-18',
-    text: '買電擊棒偷電路人',
-  },
-])
+const dialog = useTemplateRef<HTMLElement>('dialog')
+const closeButton = useTemplateRef<HTMLButtonElement>('closeButton')
 
 const monthOptions = Array.from({ length: 12 }, (_, index) => index + 1)
 
@@ -168,7 +148,7 @@ function openDateFilter() {
 }
 
 function resetDateFilter() {
-  setPendingRange(defaultStartDate, refreshTodayDateKey())
+  setPendingRange(earliestAvailableDate.value, refreshTodayDateKey())
   pendingSortOrder.value = 'newest'
 }
 
@@ -195,18 +175,10 @@ function cancelDateFilter() {
 
 function addDraft() {
   const text = normalizeInspirationText(draftText.value)
-  if (!text) return
+  if (!text) return true
 
   const draftDate = refreshTodayDateKey()
-
-  items.value = [
-    {
-      id: nextId.value,
-      date: draftDate,
-      text,
-    },
-    ...items.value,
-  ]
+  if (!addItem({ date: draftDate, text })) return false
   if (draftDate < appliedStartDate.value) {
     appliedStartDate.value = draftDate
   }
@@ -217,15 +189,16 @@ function addDraft() {
   if (isDateFilterOpen.value) {
     syncPendingFilter()
   }
-  nextId.value += 1
   draftText.value = ''
+  return true
 }
 
 function deleteItem(id: number) {
-  items.value = items.value.filter((item) => item.id !== id)
+  if (!persistDeleteItem(id)) return false
   if (editingItemId.value === id) {
     cancelEditItem()
   }
+  return true
 }
 
 function requestDeleteItem(id: number) {
@@ -239,8 +212,9 @@ function cancelDeleteItem() {
 function confirmDeleteItem() {
   if (pendingDeleteItemId.value === null) return
 
-  deleteItem(pendingDeleteItemId.value)
-  pendingDeleteItemId.value = null
+  if (deleteItem(pendingDeleteItemId.value)) {
+    pendingDeleteItemId.value = null
+  }
 }
 
 function openTaskPrompt(item: InspirationItem) {
@@ -273,12 +247,12 @@ function saveEditItem() {
   const text = normalizeInspirationText(editText.value)
   if (!text || editingItemId.value === null) return
 
-  items.value = items.value.map((item) =>
-    item.id === editingItemId.value
-      ? { ...item, text }
-      : item,
-  )
-  cancelEditItem()
+  if (updateItem(editingItemId.value, text)) cancelEditItem()
+}
+
+function closeModal() {
+  if (!addDraft()) return
+  emit('close')
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {
@@ -298,7 +272,7 @@ const handleKeyDown = (e: KeyboardEvent) => {
       return
     }
 
-    emit('close')
+    closeModal()
   }
 }
 
@@ -309,15 +283,23 @@ onMounted(() => {
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
 })
+
+useAccessibleDialog({
+  dialog,
+  initialFocus: closeButton,
+  onClose: closeModal,
+  backgroundSelector: '[data-app-route-content]',
+  closeOnEscape: false,
+})
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="inspiration-backdrop" role="presentation" @click.self="emit('close')">
-      <section class="inspiration-modal" role="dialog" aria-modal="true" aria-labelledby="inspiration-title">
+    <div class="inspiration-backdrop" role="presentation" @click.self="closeModal">
+      <section ref="dialog" class="inspiration-modal" role="dialog" aria-modal="true" aria-labelledby="inspiration-title" tabindex="-1">
         <header class="inspiration-header">
           <h2 id="inspiration-title">靈感清單</h2>
-          <button type="button" class="inspiration-close" aria-label="關閉" @click="emit('close')">
+          <button ref="closeButton" type="button" class="inspiration-close" aria-label="關閉" @click="closeModal">
             <span aria-hidden="true">&times;</span>
           </button>
         </header>
@@ -411,7 +393,12 @@ onUnmounted(() => {
               :maxlength="inspirationTextMaxLength"
               placeholder="今天有甚麼想法嗎?馬上記錄下來吧!"
             >
+            <button type="submit" :disabled="!draftText.trim()">新增</button>
           </form>
+
+          <p v-if="errorMessage" class="inspiration-storage-error" role="alert" aria-live="assertive">
+            {{ errorMessage }}
+          </p>
 
           <div class="inspiration-groups">
             <section v-for="group in groupedItems" :key="group.date" class="inspiration-group">

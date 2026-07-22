@@ -18,7 +18,7 @@ func InitMinio(cfg *Config) {
 	var err error
 	minioClient, err = minio.New(cfg.MinioEndpoint, &minio.Options{
 		Creds:  credentials.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
-		Secure: false,
+		Secure: cfg.MinioSecure,
 	})
 	if err != nil {
 		log.Fatalf("connect MinIO failed: %v", err)

@@ -6,6 +6,7 @@
 
 # --- 全局速率限制區 (防爆流量打 Redis,對應圖中「炸了全服務會延遲」的風險) ---
 limit_req_zone ${DOLLAR}binary_remote_addr zone=api_general:10m rate=30r/s;
+# 帳密與驗證碼端點使用的嚴格 limiter。
 limit_req_zone ${DOLLAR}binary_remote_addr zone=api_login:10m rate=5r/m;
 limit_conn_zone ${DOLLAR}binary_remote_addr zone=perip:10m;
 
@@ -61,7 +62,7 @@ server {
     limit_conn perip 50;
 
     # --- 客戶端上傳限制 (社群服務要上傳圖片/影片,給大一點) ---
-    client_max_body_size 40m;
+    client_max_body_size 25m;
     client_body_timeout  60s;
     client_header_timeout 10s;
 
@@ -98,9 +99,11 @@ server {
         proxy_buffers         8 16k;
     }
 
-    # --- 登入/註冊 路由加嚴格限流 (防暴力破解) ---
-    location ~ ^/api/(auth|login|register)/ {
+    # --- 帳密與驗證碼端點加嚴格限流 (防暴力破解) ---
+    # session/logout 是正常登入生命週期流量，保留在一般 API limiter。
+    location ~ ^/api/auth/(login|register|send-code)$ {
         limit_req zone=api_login burst=10 nodelay;
+        limit_req_status 429;
 
         proxy_pass         http://api_backend;
         proxy_http_version 1.1;
@@ -118,6 +121,7 @@ server {
         proxy_set_header   Connection        "upgrade";
         proxy_set_header   Host              ${DOLLAR}host;
         proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
+        proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
         proxy_read_timeout 3600s;
     }
 
@@ -132,6 +136,12 @@ server {
         location ~* \.(?:css|js|woff2?|ttf|eot|otf|svg|png|jpg|jpeg|gif|webp|ico)$ {
             root /usr/share/nginx/html;
             expires 30d;
+            add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Frame-Options "SAMEORIGIN" always;
+            add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+            add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+            add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';" always;
             add_header Cache-Control "public, immutable";
             access_log off;
         }

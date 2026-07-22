@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/websocket"
+	"typewsp/shared/contracts"
 )
 
 // upgrader 把 HTTP 連線升級成 WebSocket；第一版先放寬 origin，正式版應改成白名單。
@@ -28,15 +29,48 @@ func sameOrigin(r *http.Request) bool {
 		return false
 	}
 
-	return normalizedHost(originURL.Host) == normalizedHost(r.Host)
+	expectedScheme := strings.ToLower(strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")))
+	if commaIndex := strings.IndexByte(expectedScheme, ','); commaIndex >= 0 {
+		expectedScheme = strings.TrimSpace(expectedScheme[:commaIndex])
+	}
+	if expectedScheme == "" {
+		if r.TLS != nil {
+			expectedScheme = "https"
+		} else {
+			expectedScheme = "http"
+		}
+	}
+	if originURL.Scheme != expectedScheme {
+		return false
+	}
+
+	originHost, err := normalizedHostPort(originURL.Host, originURL.Scheme)
+	if err != nil {
+		return false
+	}
+	requestHost, err := normalizedHostPort(r.Host, expectedScheme)
+	if err != nil {
+		return false
+	}
+	return originHost == requestHost
 }
 
-func normalizedHost(host string) string {
+func normalizedHostPort(host, scheme string) (string, error) {
 	host = strings.ToLower(strings.TrimSpace(host))
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		return h
+	if host == "" {
+		return "", fmt.Errorf("empty host")
 	}
-	return host
+	if h, port, err := net.SplitHostPort(host); err == nil {
+		return net.JoinHostPort(h, port), nil
+	}
+
+	defaultPort := "80"
+	if scheme == "https" {
+		defaultPort = "443"
+	} else if scheme != "http" {
+		return "", fmt.Errorf("unsupported origin scheme %q", scheme)
+	}
+	return net.JoinHostPort(strings.Trim(host, "[]"), defaultPort), nil
 }
 
 // handleWebSocket 驗證 session 後訂閱該使用者的 Redis channel。
@@ -63,7 +97,7 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	channel := fmt.Sprintf("notify:user:%d", user.ID)
+	channel := contracts.NotifyUserChannel(user.ID)
 	sub := rdb.Subscribe(ctx, channel)
 	defer sub.Close()
 

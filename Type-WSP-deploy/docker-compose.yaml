@@ -9,15 +9,15 @@ services:
       - "443:8443"
     environment:
       BACKEND_HOST: api
-      BACKEND_PORT: 5000
-      SERVER_NAME: localhost
+      BACKEND_PORT: ${API_PORT:?set API_PORT in .env}
+      SERVER_NAME: ${SERVER_NAME:?set SERVER_NAME in .env}
       PORT: 8080
       SSL_PORT: 8443
       DOLLAR: $
       MODSEC_RULE_ENGINE: On
       MODSEC_AUDIT_LOG: /dev/stdout
       MODSEC_AUDIT_ENGINE: RelevantOnly
-      MODSEC_REQ_BODY_LIMIT: 41943040
+      MODSEC_REQ_BODY_LIMIT: 26214400
       MODSEC_REQ_BODY_NOFILES_LIMIT: 131072
       PARANOIA: 1
       ANOMALY_INBOUND: 5
@@ -38,21 +38,30 @@ services:
 
   # Application layer：Go API，處理登入、貼文、上傳、WebSocket。
   api:
-    build: ./api
+    build:
+      context: .
+      dockerfile: api/Dockerfile
     container_name: api-server
     expose:
-      - "5000"
+      - "${API_PORT:?set API_PORT in .env}"
     environment:
+      APP_ENV: ${APP_ENV:-production}
+      API_LISTEN_ADDR: ":${API_PORT:?set API_PORT in .env}"
+      EXPOSE_VERIFICATION_CODE: ${EXPOSE_VERIFICATION_CODE:-false}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-86400}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB_SYSTEM: system_db
-      POSTGRES_DB_USER: user_db
+      POSTGRES_DB_SYSTEM: ${POSTGRES_DB_SYSTEM:?set POSTGRES_DB_SYSTEM in .env}
+      POSTGRES_DB_USER: ${POSTGRES_DB_USER:?set POSTGRES_DB_USER in .env}
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:?set POSTGRES_SSLMODE in .env}
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:?set MINIO_BUCKET in .env}
+      MINIO_SECURE: ${MINIO_SECURE:?set MINIO_SECURE in .env}
       SECRET_KEY: "${SECRET_KEY:?set SECRET_KEY in .env}"
     networks:
       - app_net
@@ -84,18 +93,24 @@ services:
 
   # Worker 消費 Redis task_queue，處理圖片與寄信任務，避免 API request 等太久。
   worker:
-    build: ./worker
+    build:
+      context: .
+      dockerfile: worker/Dockerfile
     environment:
+      APP_ENV: ${APP_ENV:-production}
       REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB_SYSTEM: system_db
-      POSTGRES_DB_USER: user_db
+      POSTGRES_DB_SYSTEM: ${POSTGRES_DB_SYSTEM:?set POSTGRES_DB_SYSTEM in .env}
+      POSTGRES_DB_USER: ${POSTGRES_DB_USER:?set POSTGRES_DB_USER in .env}
+      POSTGRES_SSLMODE: ${POSTGRES_SSLMODE:?set POSTGRES_SSLMODE in .env}
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      MINIO_BUCKET: ${MINIO_BUCKET:?set MINIO_BUCKET in .env}
+      MINIO_SECURE: ${MINIO_SECURE:?set MINIO_SECURE in .env}
     networks:
       - app_net
       - db_net
@@ -117,7 +132,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: system_db
+      POSTGRES_DB: ${POSTGRES_DB_SYSTEM:?set POSTGRES_DB_SYSTEM in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro

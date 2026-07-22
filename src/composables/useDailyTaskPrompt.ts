@@ -1,7 +1,7 @@
 import { shallowRef } from 'vue'
 import { getLocalTodayKey } from '../utils/date'
 
-const IGNORED_PATHS = new Set(['/login', '/forgot-password'])
+const IGNORED_PATHS = new Set(['/', '/login', '/forgot-password'])
 
 export const showDailyTaskPrompt = shallowRef(false)
 
@@ -11,10 +11,14 @@ export function getTodayTaskDate() {
   return getLocalTodayKey()
 }
 
-export function maybeOpenDailyTaskPrompt(path: string) {
-  if (IGNORED_PATHS.has(path)) {
-    hasPromptedForCurrentLogin = false
-    showDailyTaskPrompt.value = false
+export function resetDailyTaskPrompt() {
+  hasPromptedForCurrentLogin = false
+  showDailyTaskPrompt.value = false
+}
+
+export function maybeOpenDailyTaskPrompt(path: string, scheduleReady: boolean) {
+  if (!scheduleReady || IGNORED_PATHS.has(path)) {
+    resetDailyTaskPrompt()
     return
   }
 

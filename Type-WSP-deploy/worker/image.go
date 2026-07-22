@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"image"
 	"image/jpeg"
@@ -11,10 +12,13 @@ import (
 	"io"
 	"log"
 	"path/filepath"
+	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/minio/minio-go/v7"
 	"github.com/rwcarlsen/goexif/exif"
 	"golang.org/x/image/draw"
+	"typewsp/shared/contracts"
 )
 
 const maxDimension = 4096
@@ -32,44 +36,55 @@ type processedImage struct {
 // 1. 從 MinIO raw/ 讀原圖。
 // 2. 修正 EXIF 方向，必要時縮圖並重新壓縮。
 // 3. 把處理後的圖片存到 processed/，更新 DB 為 ready，並通知前端。
-func processImagePost(ctx context.Context, payload ImagePostPayload) {
+func processImagePost(ctx context.Context, payload ImagePostPayload) error {
+	if payload.PostID <= 0 || payload.UserID <= 0 || len(payload.RawKeys) == 0 {
+		return fmt.Errorf("invalid image task payload")
+	}
+
+	var currentStatus string
+	if err := systemPool.QueryRow(ctx, "SELECT image_status FROM posts WHERE id = $1", payload.PostID).Scan(&currentStatus); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("load post image status failed: %w", err)
+	}
+	if currentStatus == "ready" {
+		return nil
+	}
+
 	ops := NewAtomicRollback()
 	var processedKeys []string
 
 	for _, rawKey := range payload.RawKeys {
+		if !isRawImageKey(rawKey) {
+			ops.Execute()
+			return fmt.Errorf("invalid raw image key %q", rawKey)
+		}
 		rawObj, err := minioClient.GetObject(ctx, minioBucket, rawKey, minio.GetObjectOptions{})
 		if err != nil {
-			log.Printf("[image] get raw object failed key=%s: %v", rawKey, err)
-			markPostFailed(ctx, payload.PostID)
 			ops.Execute()
-			return
+			return fmt.Errorf("get raw object failed key=%s: %w", rawKey, err)
 		}
 
 		rawData, err := readRawImage(rawObj)
 		if err != nil {
-			log.Printf("[image] read raw object failed: %v", err)
-			markPostFailed(ctx, payload.PostID)
 			ops.Execute()
-			return
+			return fmt.Errorf("read raw object failed: %w", err)
 		}
 
 		processed, err := resizeAndCompress(rawData)
 		if err != nil {
-			log.Printf("[image] process image failed: %v", err)
-			markPostFailed(ctx, payload.PostID)
 			ops.Execute()
-			return
+			return fmt.Errorf("process image failed: %w", err)
 		}
 
-		processedKey := "processed/" + rawKey[4:len(rawKey)-len(filepath.Ext(rawKey))] + processed.extension
+		processedKey := contracts.ProcessedImagePrefix + rawKey[len(contracts.RawImagePrefix):len(rawKey)-len(filepath.Ext(rawKey))] + processed.extension
 		reader := bytes.NewReader(processed.data)
 		_, err = minioClient.PutObject(ctx, minioBucket, processedKey, reader, int64(len(processed.data)),
 			minio.PutObjectOptions{ContentType: processed.contentType})
 		if err != nil {
-			log.Printf("[image] put processed object failed: %v", err)
-			markPostFailed(ctx, payload.PostID)
 			ops.Execute()
-			return
+			return fmt.Errorf("put processed object failed: %w", err)
 		}
 
 		processedKeys = append(processedKeys, processedKey)
@@ -80,14 +95,17 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) {
 	}
 
 	processedJSON, _ := json.Marshal(processedKeys)
-	_, err := systemPool.Exec(ctx,
-		`UPDATE posts SET image_url = $1, image_status = 'ready' WHERE id = $2`,
+	tag, err := systemPool.Exec(ctx,
+		`UPDATE posts SET image_url = $1, image_status = 'ready' WHERE id = $2 AND image_status = 'processing'`,
 		string(processedJSON), payload.PostID,
 	)
 	if err != nil {
-		log.Printf("[image] update post image state failed: %v", err)
 		ops.Execute()
-		return
+		return fmt.Errorf("update post image state failed: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		ops.Execute()
+		return nil
 	}
 
 	for _, rawKey := range payload.RawKeys {
@@ -96,17 +114,66 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) {
 		}
 	}
 
-	rdb.Del(ctx, "feed:latest")
+	rdb.Del(ctx, contracts.FeedCacheKey)
 
-	notifyChannel := fmt.Sprintf("notify:user:%d", payload.UserID)
+	notifyChannel := contracts.NotifyUserChannel(payload.UserID)
 	notifyMsg := fmt.Sprintf(`{"type":"post_ready","post_id":%d}`, payload.PostID)
 	rdb.Publish(ctx, notifyChannel, notifyMsg)
 
 	log.Printf("[image] post #%d processed, files=%d", payload.PostID, len(processedKeys))
+	return nil
 }
 
-func markPostFailed(ctx context.Context, postID int) {
-	systemPool.Exec(ctx, `UPDATE posts SET image_status = 'failed' WHERE id = $1`, postID)
+func markPostFailed(ctx context.Context, postID int) error {
+	_, err := systemPool.Exec(ctx, `UPDATE posts SET image_status = 'failed' WHERE id = $1`, postID)
+	return err
+}
+
+func isRawImageKey(key string) bool {
+	if !strings.HasPrefix(key, contracts.RawImagePrefix) {
+		return false
+	}
+	name := strings.TrimPrefix(key, contracts.RawImagePrefix)
+	if name == "" || strings.Contains(name, "..") || strings.Contains(name, "/") || strings.ContainsAny(name, "\\\x00") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png":
+		return true
+	default:
+		return false
+	}
+}
+
+func isProcessedImageKey(key string) bool {
+	if !strings.HasPrefix(key, contracts.ProcessedImagePrefix) {
+		return false
+	}
+	name := strings.TrimPrefix(key, contracts.ProcessedImagePrefix)
+	if name == "" || strings.Contains(name, "..") || strings.Contains(name, "/") || strings.ContainsAny(name, "\\\x00") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png":
+		return true
+	default:
+		return false
+	}
+}
+
+func deleteImages(ctx context.Context, payload ImageDeletePayload) error {
+	if len(payload.Keys) == 0 {
+		return nil
+	}
+	for _, key := range payload.Keys {
+		if !isRawImageKey(key) && !isProcessedImageKey(key) {
+			return fmt.Errorf("invalid image cleanup key %q", key)
+		}
+		if err := minioClient.RemoveObject(ctx, minioBucket, key, minio.RemoveObjectOptions{}); err != nil {
+			return fmt.Errorf("remove image %s failed: %w", key, err)
+		}
+	}
+	return nil
 }
 
 func readRawImage(rawObj io.ReadCloser) ([]byte, error) {
@@ -159,14 +226,6 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 		}
 	}
 
-	if newW == origW && newH == origH && orientation == 1 {
-		return &processedImage{
-			data:        data,
-			contentType: contentType,
-			extension:   extension,
-		}, nil
-	}
-
 	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
 	draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
 
@@ -177,8 +236,8 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 		}
 		return &processedImage{
 			data:        buf.Bytes(),
-			contentType: "image/png",
-			extension:   ".png",
+			contentType: contentType,
+			extension:   extension,
 		}, nil
 	}
 
@@ -188,8 +247,8 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 
 	return &processedImage{
 		data:        buf.Bytes(),
-		contentType: "image/jpeg",
-		extension:   ".jpg",
+		contentType: contentType,
+		extension:   extension,
 	}, nil
 }
 

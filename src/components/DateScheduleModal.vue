@@ -1,8 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, shallowRef, useTemplateRef } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, shallowRef, useTemplateRef, watch } from 'vue'
 import {
-  priorityMeta,
-  taskImportanceCount,
   type Priority,
   type ReminderItem,
   type TaskItem,
@@ -10,16 +8,20 @@ import {
 } from '../composables/useScheduleMock'
 import { formatLocalDateKey } from '../utils/date'
 import DailyTaskPrompt from './DailyTaskPrompt.vue'
+import DateScheduleItems from './DateScheduleItems.vue'
+import DateScheduleReminderEditor from './DateScheduleReminderEditor.vue'
+import TaskDeleteConfirmDialog from './TaskDeleteConfirmDialog.vue'
 
 const props = defineProps<{
   dateKey: string
+  startWithNewReminder?: boolean
+  editReminderId?: number | null
 }>()
 
 const emit = defineEmits<{
   close: []
   'update:dateKey': [value: string]
 }>()
-
 const {
   sortedTasks,
   sortedReminders,
@@ -31,11 +33,14 @@ const {
 } = useScheduleMock()
 
 type EditingKind = 'task' | 'reminder' | 'new-reminder'
-
+type PendingDelete =
+  | { kind: 'task'; item: TaskItem }
+  | { kind: 'reminder'; item: ReminderItem }
 const editingKind = shallowRef<EditingKind | null>(null)
 const editingId = shallowRef<number | null>(null)
 const isDailyTaskPromptOpen = shallowRef(false)
 const taskPromptEditId = shallowRef<number | null>(null)
+const pendingDelete = shallowRef<PendingDelete | null>(null)
 const editForm = reactive({
   title: '',
   note: '',
@@ -44,9 +49,15 @@ const editForm = reactive({
   startTime: '08:00',
   endTime: '09:00',
 })
-const startTimeInput = useTemplateRef<HTMLInputElement>('startTimeInput')
-const endTimeInput = useTemplateRef<HTMLInputElement>('endTimeInput')
-
+const dateScheduleModal = useTemplateRef<HTMLElement>('dateScheduleModal')
+const dateScheduleClose = useTemplateRef<HTMLButtonElement>('dateScheduleClose')
+const reminderEditor = useTemplateRef<InstanceType<typeof DateScheduleReminderEditor>>('reminderEditor')
+let outerReturnFocus = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
+  ? document.activeElement
+  : null
+let reminderEditorReturnFocus: HTMLElement | null = null
+let reminderEditorReturnId: number | null = null
+let pendingDeleteReturnFocus: HTMLElement | null = null
 function parseDateKey(dateKey: string) {
   const [year, month, day] = dateKey.split('-').map(Number)
   return new Date(year, month - 1, day)
@@ -70,7 +81,6 @@ const reminderEditorDateLabel = computed(() => formatReminderDateLabel(reminderE
 const dateReminders = computed(() =>
   sortedReminders.value.filter((reminder) => reminder.date === props.dateKey),
 )
-
 const dateTasks = computed(() =>
   sortedTasks.value.filter((task) => task.date === props.dateKey),
 )
@@ -78,11 +88,129 @@ const dateTasks = computed(() =>
 const isReminderForm = computed(() => editingKind.value === 'reminder' || editingKind.value === 'new-reminder')
 const isTaskEditPanelOpen = computed(() => editingKind.value === 'task')
 const isReminderEditorOpen = computed(() => isReminderForm.value)
+const isOuterDialogInert = computed(() =>
+  isReminderEditorOpen.value || isDailyTaskPromptOpen.value,
+)
+const isOuterDialogInactive = computed(() =>
+  isOuterDialogInert.value || pendingDelete.value !== null,
+)
 const editPanelTitle = computed(() => {
   if (editingKind.value === 'new-reminder') return '新增提醒'
   if (editingKind.value === 'reminder') return '編輯提醒'
   return '編輯任務'
 })
+
+const focusableSelector = [
+  'button:not([disabled])',
+  '[href]',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(', ')
+
+function isUsableFocusTarget(element: HTMLElement | null): element is HTMLElement {
+  return Boolean(element && element.isConnected && element !== document.body)
+}
+
+function focusWithoutScroll(element: HTMLElement | null) {
+  if (!isUsableFocusTarget(element)) return
+  element.focus({ preventScroll: true })
+}
+
+function getFocusableElements(panel: HTMLElement | null) {
+  if (!panel) return []
+
+  return Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector))
+    .filter((element) => element.getClientRects().length > 0)
+}
+
+function trapDialogFocus(event: KeyboardEvent, panel: HTMLElement | null) {
+  const focusableElements = getFocusableElements(panel)
+  if (!panel || focusableElements.length === 0) {
+    event.preventDefault()
+    focusWithoutScroll(panel)
+    return
+  }
+
+  const firstElement = focusableElements[0]
+  const lastElement = focusableElements[focusableElements.length - 1]
+  const activeElement = document.activeElement
+
+  if (!(activeElement instanceof Node) || !panel.contains(activeElement)) {
+    event.preventDefault()
+    focusWithoutScroll(event.shiftKey ? lastElement : firstElement)
+    return
+  }
+
+  if (event.shiftKey && activeElement === firstElement) {
+    event.preventDefault()
+    focusWithoutScroll(lastElement)
+    return
+  }
+
+  if (!event.shiftKey && activeElement === lastElement) {
+    event.preventDefault()
+    focusWithoutScroll(firstElement)
+  }
+}
+
+function handleOuterDialogTab(event: KeyboardEvent) {
+  trapDialogFocus(event, dateScheduleModal.value)
+}
+
+function handleReminderDialogTab(event: KeyboardEvent) {
+  trapDialogFocus(event, reminderEditor.value?.dialog ?? null)
+}
+
+function rememberReminderEditorTrigger(reminderId: number | null) {
+  const activeElement = document.activeElement
+  reminderEditorReturnFocus = activeElement instanceof HTMLElement ? activeElement : null
+  reminderEditorReturnId = reminderId
+}
+
+function focusOuterDialog() {
+  void nextTick(() => focusWithoutScroll(dateScheduleClose.value))
+}
+
+function focusReminderEditor() {
+  void nextTick(() => focusWithoutScroll(reminderEditor.value?.titleInput ?? null))
+}
+
+function restoreReminderEditorFocus() {
+  const returnFocus = reminderEditorReturnFocus
+  const reminderId = reminderEditorReturnId
+  reminderEditorReturnFocus = null
+  reminderEditorReturnId = null
+
+  void nextTick(() => {
+    const fallback = reminderId === null
+      ? dateScheduleModal.value?.querySelector<HTMLElement>('[data-add-reminder]') ?? null
+      : dateScheduleModal.value?.querySelector<HTMLButtonElement>(`[data-reminder-edit-id="${reminderId}"]`) ?? null
+    const returnFocusIsInsideOuter = Boolean(
+      isUsableFocusTarget(returnFocus) && dateScheduleModal.value?.contains(returnFocus),
+    )
+    focusWithoutScroll(returnFocusIsInsideOuter ? returnFocus : fallback ?? dateScheduleClose.value)
+  })
+}
+
+function resolveOuterReturnFocus() {
+  if (isUsableFocusTarget(outerReturnFocus)) return outerReturnFocus
+
+  if (props.editReminderId !== undefined && props.editReminderId !== null) {
+    return document.querySelector<HTMLElement>(
+      `[aria-controls="sidebar-reminder-menu-${props.editReminderId}"]`,
+    )
+  }
+
+  if (props.startWithNewReminder) {
+    return document.querySelector<HTMLElement>('.reminder-panel .add-task-btn')
+  }
+
+  return document.querySelector<HTMLElement>(
+    `[aria-label="查看 ${props.dateKey} 的行程"]`,
+  )
+}
 
 function formatReminderDateLabel(dateKey: string) {
   return new Intl.DateTimeFormat('zh-TW', {
@@ -105,47 +233,6 @@ function defaultReminderEndTime(startTime: string) {
   return addMinutesToTime(startTime || '08:00', 60)
 }
 
-function updateReminderStartTime(event: Event) {
-  const input = event.target
-  if (!(input instanceof HTMLInputElement)) return
-
-  editForm.startTime = input.value
-  if (!editForm.endTime || editForm.endTime <= input.value) {
-    editForm.endTime = defaultReminderEndTime(input.value)
-  }
-}
-
-function openTimePicker(input: HTMLInputElement | null) {
-  if (!input) return
-
-  input.focus()
-  try {
-    input.showPicker?.()
-  } catch {
-    // Some browsers only allow native pickers from direct user activation.
-  }
-}
-
-function openStartTimePicker() {
-  openTimePicker(startTimeInput.value)
-}
-
-function openEndTimePicker() {
-  openTimePicker(endTimeInput.value)
-}
-
-function reminderTimeRange(reminder: ReminderItem) {
-  return reminder.endTime ? `${reminder.time} - ${reminder.endTime}` : reminder.time
-}
-
-function handleHorizontalRowWheel(event: WheelEvent) {
-  const row = event.currentTarget
-  if (!(row instanceof HTMLElement)) return
-
-  event.preventDefault()
-  row.scrollLeft += event.deltaY
-}
-
 function shiftDate(offset: number) {
   const nextDate = parseDateKey(props.dateKey)
   nextDate.setDate(nextDate.getDate() + offset)
@@ -154,6 +241,7 @@ function shiftDate(offset: number) {
 }
 
 function startAddReminder() {
+  rememberReminderEditorTrigger(null)
   editingKind.value = 'new-reminder'
   editingId.value = null
   editForm.title = ''
@@ -165,6 +253,7 @@ function startAddReminder() {
 }
 
 function startEditReminder(reminder: ReminderItem) {
+  rememberReminderEditorTrigger(reminder.id)
   editingKind.value = 'reminder'
   editingId.value = reminder.id
   editForm.title = reminder.title
@@ -173,6 +262,20 @@ function startEditReminder(reminder: ReminderItem) {
   editForm.date = reminder.date
   editForm.startTime = reminder.time
   editForm.endTime = reminder.endTime ?? defaultReminderEndTime(reminder.time)
+}
+
+function openRequestedReminderEditor() {
+  const reminderId = props.editReminderId
+  if (reminderId === undefined || reminderId === null) return false
+
+  const reminder = sortedReminders.value.find((item) => item.id === reminderId)
+  if (!reminder) {
+    emit('close')
+    return true
+  }
+
+  startEditReminder(reminder)
+  return true
 }
 
 function startEditTask(task: TaskItem) {
@@ -208,8 +311,9 @@ function saveReminder(closeAfterSave = true) {
     ? defaultReminderEndTime(startTime)
     : editForm.endTime
 
+  let saved = false
   if (kind === 'new-reminder') {
-    addReminder({
+    saved = addReminder({
       title,
       date,
       time: startTime,
@@ -220,7 +324,7 @@ function saveReminder(closeAfterSave = true) {
     const id = editingId.value
     if (!id) return false
 
-    updateReminder(id, {
+    saved = updateReminder(id, {
       title,
       date,
       time: startTime,
@@ -228,6 +332,8 @@ function saveReminder(closeAfterSave = true) {
       note: editForm.note.trim(),
     })
   }
+
+  if (!saved) return false
 
   emit('update:dateKey', date)
   if (closeAfterSave) {
@@ -244,6 +350,7 @@ function saveReminderAndCreateNext() {
   editingId.value = null
   editForm.title = ''
   editForm.note = ''
+  focusReminderEditor()
 }
 
 function saveEdit() {
@@ -259,29 +366,61 @@ function saveEdit() {
   const id = editingId.value
   if (!id) return
 
-  updateTask(id, {
+  const saved = updateTask(id, {
     title,
     note: editForm.note.trim(),
     priority: editForm.priority,
   })
 
-  cancelEdit()
+  if (saved) cancelEdit()
 }
 
-function removeReminder(reminderId: number) {
-  if (editingKind.value === 'reminder' && editingId.value === reminderId) cancelEdit()
-  deleteReminder(reminderId)
+function requestDeleteReminder(reminder: ReminderItem) {
+  pendingDeleteReturnFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null
+  pendingDelete.value = { kind: 'reminder', item: reminder }
 }
 
-function removeTask(taskId: number) {
-  if (editingKind.value === 'task' && editingId.value === taskId) cancelEdit()
-  deleteTask(taskId)
+function requestDeleteTask(task: TaskItem) {
+  pendingDeleteReturnFocus = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null
+  pendingDelete.value = { kind: 'task', item: task }
+}
+
+function closeDeleteConfirmation() {
+  const returnFocus = pendingDeleteReturnFocus
+  pendingDeleteReturnFocus = null
+  pendingDelete.value = null
+  void nextTick(() => {
+    const returnFocusIsInsideOuter = Boolean(
+      isUsableFocusTarget(returnFocus) && dateScheduleModal.value?.contains(returnFocus),
+    )
+    focusWithoutScroll(returnFocusIsInsideOuter ? returnFocus : dateScheduleClose.value)
+  })
+}
+
+function confirmPendingDelete() {
+  const pending = pendingDelete.value
+  if (!pending) return
+
+  const deleted = pending.kind === 'reminder'
+    ? deleteReminder(pending.item.id)
+    : deleteTask(pending.item.id)
+  pendingDeleteReturnFocus = null
+  pendingDelete.value = null
+
+  if (deleted) {
+    void nextTick(() => focusWithoutScroll(dateScheduleClose.value))
+  }
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {
-  if (isDailyTaskPromptOpen.value) return
+  if (e.defaultPrevented || pendingDelete.value || isDailyTaskPromptOpen.value) return
 
   if (e.key === 'Escape') {
+    e.preventDefault()
     if (editingKind.value) {
       cancelEdit()
       return
@@ -291,27 +430,76 @@ const handleKeyDown = (e: KeyboardEvent) => {
   }
 }
 
+function handleBackdropClick() {
+  if (pendingDelete.value || isDailyTaskPromptOpen.value) return
+
+  if (isReminderEditorOpen.value) {
+    cancelEdit()
+    return
+  }
+
+  emit('close')
+}
+
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)
+  if (isReminderEditorOpen.value) {
+    focusReminderEditor()
+    return
+  }
+
+  focusOuterDialog()
+})
+
+onBeforeUnmount(() => {
+  focusWithoutScroll(resolveOuterReturnFocus())
+  outerReturnFocus = null
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleKeyDown)
 })
+
+watch(
+  () => [props.startWithNewReminder, props.editReminderId] as const,
+  () => {
+    if (openRequestedReminderEditor()) return
+    if (props.startWithNewReminder) startAddReminder()
+  },
+  { immediate: true },
+)
+
+watch(
+  isReminderEditorOpen,
+  (isOpen, wasOpen) => {
+    if (isOpen) {
+      focusReminderEditor()
+      return
+    }
+
+    if (wasOpen) restoreReminderEditorFocus()
+  },
+  { flush: 'post' },
+)
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="date-schedule-backdrop" role="presentation" @click.self="emit('close')">
+    <div class="date-schedule-backdrop" role="presentation" @click.self="handleBackdropClick">
       <section
+        ref="dateScheduleModal"
         class="date-schedule-modal"
         :class="{
           'date-schedule-modal-reminder-editing': isReminderEditorOpen,
           'date-schedule-modal-task-prompt-open': isDailyTaskPromptOpen,
         }"
         role="dialog"
-        aria-modal="true"
+        :inert="isOuterDialogInactive"
+        :aria-hidden="isOuterDialogInactive ? 'true' : undefined"
+        :aria-modal="isOuterDialogInactive ? undefined : 'true'"
         aria-labelledby="date-schedule-title"
+        tabindex="-1"
+        @keydown.tab="handleOuterDialogTab"
       >
         <header class="date-schedule-header">
           <button type="button" class="date-schedule-nav" aria-label="前一天" @click="shiftDate(-1)">
@@ -328,7 +516,7 @@ onUnmounted(() => {
 
           <p id="date-schedule-title" class="date-schedule-title">{{ selectedLabel }}</p>
 
-          <button type="button" class="date-schedule-close" aria-label="關閉" @click="emit('close')">
+          <button ref="dateScheduleClose" type="button" class="date-schedule-close" aria-label="關閉" @click="emit('close')">
             <span aria-hidden="true">&times;</span>
           </button>
         </header>
@@ -361,152 +549,50 @@ onUnmounted(() => {
           </div>
         </form>
 
-        <section ref="reminderRow" class="date-schedule-reminders" aria-label="提醒" @wheel="handleHorizontalRowWheel">
-          <article v-for="reminder in dateReminders" :key="reminder.id" class="date-reminder-card">
-            <h3>{{ reminder.title }}</h3>
-            <p class="date-reminder-note">{{ reminder.note || '（無備註）' }}</p>
-            <p class="date-reminder-time">{{ reminderTimeRange(reminder) }}</p>
-
-            <div class="date-card-actions">
-              <button type="button" @click="startEditReminder(reminder)">編輯</button>
-              <button type="button" @click="removeReminder(reminder.id)">刪除</button>
-            </div>
-          </article>
-
-          <button
-            type="button"
-            class="date-add-reminder-card"
-            :class="{ 'date-add-reminder-card-empty': dateReminders.length === 0 }"
-            @click="startAddReminder"
-          >
-            <span class="date-add-reminder-empty-label">這天沒有提醒</span>
-            <span class="date-add-reminder-add-label">新增提醒</span>
-            <strong aria-hidden="true">+</strong>
-          </button>
-        </section>
-
-        <section ref="taskRow" class="date-schedule-tasks" aria-label="任務" @wheel="handleHorizontalRowWheel">
-          <article v-for="task in dateTasks" :key="task.id" class="date-task-card">
-            <div class="date-task-priority" :aria-label="priorityMeta[task.priority].label">
-              <span
-                v-for="dot in taskImportanceCount(task)"
-                :key="dot"
-                class="filled"
-                aria-hidden="true"
-              ></span>
-            </div>
-
-            <h3>{{ task.title }}</h3>
-            <p>{{ task.note || '（無備註）' }}</p>
-
-            <div class="date-card-actions date-task-actions">
-              <button type="button" @click="startEditTask(task)">編輯</button>
-              <button type="button" @click="removeTask(task.id)">刪除</button>
-            </div>
-          </article>
-
-          <button
-            type="button"
-            class="date-add-task-card"
-            :class="{ 'date-add-task-card-empty': dateTasks.length === 0 }"
-            @click="openAddTaskPrompt"
-          >
-            <span class="date-add-task-empty-label">這天還沒有任務</span>
-            <span class="date-add-task-add-label">新增任務</span>
-            <strong aria-hidden="true">+</strong>
-          </button>
-        </section>
+        <DateScheduleItems
+          :reminders="dateReminders"
+          :tasks="dateTasks"
+          @add-reminder="startAddReminder"
+          @add-task="openAddTaskPrompt"
+          @edit-reminder="startEditReminder"
+          @edit-task="startEditTask"
+          @delete-reminder="requestDeleteReminder"
+          @delete-task="requestDeleteTask"
+        />
       </section>
 
-      <form
+      <DateScheduleReminderEditor
         v-if="isReminderEditorOpen"
-        class="reminder-edit-modal"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="reminder-edit-title"
-        @submit.prevent="saveEdit"
-      >
-        <div class="reminder-edit-calendar-mark" aria-hidden="true">
-          <span>{{ reminderEditorDay }}</span>
-        </div>
-
-        <header class="reminder-edit-header">
-          <h3 id="reminder-edit-title">{{ editPanelTitle }}</h3>
-          <button type="button" class="reminder-edit-close" aria-label="關閉" @click="cancelEdit">
-            <span aria-hidden="true">&times;</span>
-          </button>
-        </header>
-
-        <div class="reminder-edit-body">
-          <label class="reminder-edit-field">
-            <span>標題：</span>
-            <input v-model="editForm.title" type="text" placeholder="節日、行程..." required autofocus>
-          </label>
-
-          <label class="reminder-edit-field reminder-edit-note-field">
-            <span>備註說明：</span>
-            <span v-if="!editForm.note" class="reminder-note-optional" aria-hidden="true">（選填）</span>
-            <textarea v-model="editForm.note" rows="3"></textarea>
-          </label>
-
-          <section class="reminder-time-panel" aria-label="提醒時間">
-            <span class="reminder-time-icon" aria-hidden="true"></span>
-
-            <div class="reminder-time-card">
-              <label class="reminder-date-picker">
-                <span>{{ reminderEditorDateLabel }}</span>
-                <input v-model="editForm.date" type="date" aria-label="提醒日期">
-              </label>
-              <label class="reminder-clock-picker" @click="openStartTimePicker">
-                <strong>{{ editForm.startTime }}</strong>
-                <input
-                  ref="startTimeInput"
-                  v-model="editForm.startTime"
-                  type="time"
-                  aria-label="開始時間"
-                  @change="updateReminderStartTime"
-                >
-              </label>
-            </div>
-
-            <span class="reminder-time-arrow" aria-hidden="true">&rarr;</span>
-
-            <div class="reminder-time-card">
-              <label class="reminder-date-picker">
-                <span>{{ reminderEditorDateLabel }}</span>
-                <input v-model="editForm.date" type="date" aria-label="提醒日期">
-              </label>
-              <label class="reminder-clock-picker" @click="openEndTimePicker">
-                <strong>{{ editForm.endTime }}</strong>
-                <input ref="endTimeInput" v-model="editForm.endTime" type="time" aria-label="結束時間">
-              </label>
-            </div>
-          </section>
-
-          <div class="reminder-edit-actions">
-            <button
-              v-if="editingKind === 'new-reminder'"
-              type="button"
-              class="reminder-save-next"
-              :disabled="!editForm.title.trim()"
-              @click="saveReminderAndCreateNext"
-            >
-              儲存並新增下一項
-            </button>
-
-            <div class="reminder-edit-action-row">
-              <button type="submit" class="reminder-save" :disabled="!editForm.title.trim()">儲存</button>
-              <button type="button" class="reminder-cancel" @click="cancelEdit">取消</button>
-            </div>
-          </div>
-        </div>
-      </form>
+        ref="reminderEditor"
+        v-model:title="editForm.title"
+        v-model:note="editForm.note"
+        v-model:date="editForm.date"
+        v-model:start-time="editForm.startTime"
+        v-model:end-time="editForm.endTime"
+        :editor-title="editPanelTitle"
+        :day="reminderEditorDay"
+        :date-label="reminderEditorDateLabel"
+        :is-new="editingKind === 'new-reminder'"
+        :inactive="pendingDelete !== null"
+        @submit="saveEdit"
+        @cancel="cancelEdit"
+        @save-next="saveReminderAndCreateNext"
+        @keydown.tab="handleReminderDialogTab"
+      />
 
       <DailyTaskPrompt
         v-if="isDailyTaskPromptOpen"
         :task-date="dateKey"
         :edit-task-id="taskPromptEditId"
         @close="closeTaskPrompt"
+      />
+
+      <TaskDeleteConfirmDialog
+        v-if="pendingDelete"
+        :item="pendingDelete.item"
+        :kind="pendingDelete.kind"
+        @cancel="closeDeleteConfirmation"
+        @confirm="confirmPendingDelete"
       />
     </div>
   </Teleport>

@@ -9,7 +9,10 @@ require (
 	github.com/minio/minio-go/v7 v7.1.0
 	github.com/redis/go-redis/v9 v9.19.0
 	golang.org/x/crypto v0.52.0
+	typewsp/shared v0.0.0
 )
+
+replace typewsp/shared => ../shared
 
 require (
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect

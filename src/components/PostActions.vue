@@ -7,15 +7,6 @@ const bookmarked = ref(false)
 
 <template>
   <div class="post-actions" @mousedown.prevent>
-    <div class="post-actions-left">
-      <button type="button" class="post-action-icon" aria-label="時間">
-        <svg viewBox="0 0 24 24" aria-hidden="true">
-          <circle cx="12" cy="12" r="10"></circle>
-          <polyline points="12 6 12 12 16 14"></polyline>
-        </svg>
-      </button>
-    </div>
-
     <div class="post-actions-right">
       <button
         type="button"

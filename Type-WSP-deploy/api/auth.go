@@ -1,40 +1,134 @@
 package main
 
 import (
-	"encoding/json"
+	"crypto/rand"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net/http"
+	"net/mail"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
+	"typewsp/shared/contracts"
 )
 
 const (
-	codePrefix         = "vcode:"
-	codeTTL            = 5 * time.Minute
-	rememberSessionTTL = 30 * 24 * time.Hour
+	codePrefix          = "vcode:"
+	codeTTL             = 5 * time.Minute
+	rememberSessionTTL  = 30 * 24 * time.Hour
+	maxAuthRequestBytes = 64 << 10
+	minUsernameRunes    = 2
+	maxUsernameRunes    = 20
+	minPasswordBytes    = 8
+	maxPasswordBytes    = 72
 )
+
+var debugVerificationCode bool
+
+func InitAuth(cfg *Config) {
+	debugVerificationCode = cfg.DebugVerificationCode
+}
+
+func generateVerificationCode() (string, error) {
+	value, err := rand.Int(rand.Reader, big.NewInt(1_000_000))
+	if err != nil {
+		return "", fmt.Errorf("generate verification code failed: %w", err)
+	}
+	return fmt.Sprintf("%06d", value.Int64()), nil
+}
+
+func verificationCodeResponse(code string) M {
+	response := M{"message": "verification code sent"}
+	if debugVerificationCode {
+		response["debug_code"] = code
+	}
+	return response
+}
 
 type sendCodeRequest struct {
 	Email string `json:"email"`
 }
 
+func normalizeEmail(raw string) (string, error) {
+	email := strings.ToLower(strings.TrimSpace(raw))
+	if email == "" || len(email) > 254 || !utf8.ValidString(email) {
+		return "", fmt.Errorf("invalid email")
+	}
+
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email {
+		return "", fmt.Errorf("invalid email")
+	}
+
+	return email, nil
+}
+
+func normalizeUsername(raw string) (string, error) {
+	username := strings.TrimSpace(raw)
+	length := utf8.RuneCountInString(username)
+	if !utf8.ValidString(username) || length < minUsernameRunes || length > maxUsernameRunes {
+		return "", fmt.Errorf("username must contain 2-20 characters")
+	}
+
+	for _, char := range username {
+		if unicode.IsSpace(char) || unicode.IsControl(char) {
+			return "", fmt.Errorf("username must not contain spaces or control characters")
+		}
+	}
+
+	return username, nil
+}
+
+func validatePassword(password string) error {
+	if !utf8.ValidString(password) || len(password) < minPasswordBytes || len(password) > maxPasswordBytes {
+		return fmt.Errorf("password must contain 8-72 bytes")
+	}
+
+	var hasLetter, hasDigit bool
+	for _, char := range password {
+		hasLetter = hasLetter || unicode.IsLetter(char)
+		hasDigit = hasDigit || unicode.IsDigit(char)
+	}
+	if !hasLetter || !hasDigit {
+		return fmt.Errorf("password must include at least one letter and one number")
+	}
+
+	return nil
+}
+
+func limitAuthRequestBody(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxAuthRequestBytes)
+}
+
 // handleSendCode 產生 6 位數驗證碼，先放 Redis，再推送 email job 給 worker。
-// 第一版為了團隊 demo 會回傳 debug_code；正式環境要移除。
+// debug_code 僅能在明確的 development 設定下回傳，部署環境預設不暴露。
 func handleSendCode(w http.ResponseWriter, r *http.Request) {
+	limitAuthRequestBody(w, r)
 	var req sendCodeRequest
-	if err := readJSON(r, &req); err != nil || req.Email == "" {
-		writeJSON(w, http.StatusBadRequest, M{"error": "email is required"})
+	if err := readJSON(r, &req); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "invalid request body"})
 		return
 	}
 
-	code := fmt.Sprintf("%06d", rand.Intn(1000000))
+	email, err := normalizeEmail(req.Email)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "請輸入有效的電子信箱"})
+		return
+	}
+
+	code, err := generateVerificationCode()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "generate verification code failed"})
+		return
+	}
 	ctx := r.Context()
 	ops := NewAtomicRollback()
 
-	codeKey := codePrefix + req.Email
+	codeKey := codePrefix + email
 	if err := rdb.Set(ctx, codeKey, code, codeTTL).Err(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "save verification code failed"})
 		return
@@ -43,20 +137,16 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 		return rdb.Del(ctx, codeKey).Err()
 	})
 
-	job, _ := json.Marshal(M{
-		"type": "send_verification_email",
-		"payload": M{
-			"email": req.Email,
-			"code":  code,
-		},
-	})
-	if err := rdb.RPush(ctx, "task_queue", job).Err(); err != nil {
+	if err := enqueueTask(ctx, contracts.TaskSendVerificationEmail, M{
+		"email": email,
+		"code":  code,
+	}); err != nil {
 		ops.Execute()
 		writeJSON(w, http.StatusInternalServerError, M{"error": "enqueue email job failed"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, M{"message": "verification code sent", "debug_code": code})
+	writeJSON(w, http.StatusOK, verificationCodeResponse(code))
 }
 
 type registerRequest struct {
@@ -68,6 +158,7 @@ type registerRequest struct {
 
 // handleRegister 驗證 Redis 內的驗證碼，通過後把使用者寫入 user_db。
 func handleRegister(w http.ResponseWriter, r *http.Request) {
+	limitAuthRequestBody(w, r)
 	var req registerRequest
 	if err := readJSON(r, &req); err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "invalid request body"})
@@ -78,9 +169,28 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	username, err := normalizeUsername(req.Username)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "使用者名稱需為 2-20 個字，且不能包含空白"})
+		return
+	}
+	email, err := normalizeEmail(req.Email)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "請輸入有效的電子信箱"})
+		return
+	}
+	if err := validatePassword(req.Password); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "密碼需為 8-72 bytes，且至少包含一個字母與一個數字"})
+		return
+	}
+	if len(req.Code) != 6 || strings.IndexFunc(req.Code, func(char rune) bool { return !unicode.IsDigit(char) }) >= 0 {
+		writeJSON(w, http.StatusBadRequest, M{"error": "驗證碼必須為 6 位數字"})
+		return
+	}
+
 	ctx := r.Context()
 
-	storedCode, err := rdb.Get(ctx, codePrefix+req.Email).Result()
+	storedCode, err := rdb.Get(ctx, codePrefix+email).Result()
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "verification code expired or not found"})
 		return
@@ -100,7 +210,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 	err = WithTx(ctx, userPool, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
 			"INSERT INTO users (username, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
-			req.Username, req.Email, string(hash),
+			username, email, string(hash),
 		).Scan(&userID)
 	})
 	if err != nil {
@@ -112,7 +222,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rdb.Del(ctx, codePrefix+req.Email)
+	rdb.Del(ctx, codePrefix+email)
 	writeJSON(w, http.StatusCreated, M{"message": "registered", "user_id": userID})
 }
 
@@ -124,9 +234,15 @@ type loginRequest struct {
 
 // handleLogin 檢查帳密後建立 Redis session，並用 HttpOnly cookie 回傳 session id。
 func handleLogin(w http.ResponseWriter, r *http.Request) {
+	limitAuthRequestBody(w, r)
 	var req loginRequest
 	if err := readJSON(r, &req); err != nil || req.Email == "" || req.Password == "" {
-		writeJSON(w, http.StatusBadRequest, M{"error": "email and password are required"})
+		writeJSON(w, http.StatusBadRequest, M{"error": "請輸入電子信箱與密碼"})
+		return
+	}
+	email, err := normalizeEmail(req.Email)
+	if err != nil || len(req.Password) > maxPasswordBytes {
+		writeJSON(w, http.StatusUnauthorized, M{"error": "電子信箱或密碼不正確"})
 		return
 	}
 
@@ -134,9 +250,9 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	var user User
 	var passwordHash string
-	err := userPool.QueryRow(ctx,
+	err = userPool.QueryRow(ctx,
 		"SELECT id, username, email, password_hash FROM users WHERE email = $1",
-		req.Email,
+		email,
 	).Scan(&user.ID, &user.Username, &user.Email, &passwordHash)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid email or password"})
@@ -170,6 +286,11 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 
 	writeJSON(w, http.StatusOK, M{"user": user})
+}
+
+// handleCurrentSession 回傳已驗證 session 對應的最小使用者資料，供前端恢復登入狀態。
+func handleCurrentSession(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, M{"user": currentUser(r)})
 }
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {

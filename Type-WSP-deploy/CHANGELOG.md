@@ -4,6 +4,42 @@
 
 ---
 
+## 2026-07-15 — 登入狀態、個人排程與互動體驗更新
+
+### 登入與 Session
+
+- 新增 `GET /api/auth/session`，讓前端可透過既有 HttpOnly session cookie 恢復登入狀態。
+- 為受保護頁面加入路由守衛；未登入時導向登入頁，登入完成後回到原本目標頁面。
+- 登入與 session 探測不再由共用 `401` 處理流程提前改寫導向，避免遺失原始 redirect。
+- 區分無效／過期 session 與 Redis 等 session service 故障，分別回傳 `401` 與 `503`。
+- 登入錯誤、session 檢查與登出狀態改為明確的繁體中文提示。
+- 驗證碼改用 `crypto/rand` 產生；`debug_code` 僅在 development 且明確開啟設定時回傳。
+
+### 個人排程與提醒
+
+- 排程 localStorage 改為 `type-wsp-schedule-mock:<userId>`，避免不同登入帳號共用同一份資料。
+- 新增舊版排程匯入／放棄流程；使用者尚未決定前，禁止新增、修改、刪除及排序。
+- 補強 localStorage 不可用、容量不足與資料格式錯誤時的失敗處理，避免顯示已成功但實際未儲存。
+- 日期與今日種子資料改以本地時區建立，避免 UTC 日期造成跨日錯誤。
+- 支援新增、編輯及刪除提醒，並為任務、提醒與貼文刪除加入共用確認對話框。
+
+### 前端介面與無障礙
+
+- 重整個人與設定頁，加入登入帳號摘要、設定入口卡片、載入骨架、錯誤重試與登出區塊。
+- 排程、每日任務與刪除確認對話框加入焦點鎖定、關閉後焦點復原、`inert` 與 ARIA 狀態。
+- 側欄今日任務與提醒支援完整清單、編輯／刪除選單及獨立捲動。
+- 貼文時間改為依 `created_at` 顯示相對時間，並定期更新。
+- 已部署前端 bundle 同步重建至 `Type-WSP-deploy/frontend/dist`。
+
+### 部署與安全
+
+- nginx 僅對登入、註冊與寄送驗證碼套用嚴格限流；session 與 logout 使用一般 API 限流。
+- 補上安全 response headers，包含 HSTS、CSP、`X-Content-Type-Options`、`X-Frame-Options`、Referrer Policy 與 Permissions Policy。
+- 圖片 worker 一律重新編碼上傳圖片，移除來源 EXIF 等中繼資料，並新增對應測試。
+- 新增 auth/session 測試，涵蓋 session 恢復、無效 session 與 session service 故障情境。
+
+---
+
 ## 1. 分支合併與 Docker 部署整合
 
 ### 背景
@@ -211,7 +247,7 @@ API WebSocket handler（持續訂閱 Redis channel）
 ## 8. 尚未實作（TODO）
 
 - [ ] 驗證碼寄信：目前 Worker 僅 log 輸出，需接入 SMTP / SendGrid / AWS SES
-- [ ] 移除 `debug_code`：正式上線前移除 API 回傳的驗證碼明文
+- [x] 限制 `debug_code`：正式部署預設不回傳；僅 `APP_ENV=development` 且 `EXPOSE_VERIFICATION_CODE=true` 時允許
 - [ ] `.env` 密碼替換：所有 `change_me_*` 需換成強密碼
 - [ ] SSL 憑證：自簽憑證換成 Let's Encrypt 正式憑證
 - [ ] 前端其他頁面：explore、social、personal、freq 尚未接 API

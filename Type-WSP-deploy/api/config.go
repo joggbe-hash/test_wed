@@ -1,64 +1,204 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"os"
+	"strconv"
+	"strings"
 )
 
-// Config 集中管理 API 需要的環境變數；Docker Compose 會覆蓋這裡的開發預設值。
+// Config 集中管理 API 需要的環境變數；正式環境缺少連線設定時會拒絕啟動。
 type Config struct {
-	// PostgreSQL 連線設定。system_db 存貼文，user_db 存帳號。
+	AppEnv     string
+	ListenAddr string
+
 	PostgresHost     string
 	PostgresPort     string
 	PostgresUser     string
 	PostgresPassword string
+	PostgresSSLMode  string
 	DBSystem         string
 	DBUser           string
 
-	// Redis 同時用於 session、驗證碼、工作佇列和 WebSocket 通知。
 	RedisURL string
 
-	// MinIO 用於儲存原始圖片與 worker 壓縮後的圖片。
 	MinioEndpoint  string
 	MinioAccessKey string
 	MinioSecretKey string
 	MinioBucket    string
+	MinioSecure    bool
 
-	// Session cookie 會保存 signed session id，實際 user data 放 Redis。
-	SecretKey  string
-	SessionTTL int
+	SecretKey             string
+	SessionTTL            int
+	DebugVerificationCode bool
 }
 
-// LoadConfig 從環境變數讀取設定；本機直接跑 API 時會使用 fallback。
-func LoadConfig() *Config {
-	return &Config{
-		PostgresHost:     envOr("POSTGRES_HOST", "localhost"),
-		PostgresPort:     envOr("POSTGRES_PORT", "5432"),
-		PostgresUser:     envOr("POSTGRES_USER", "app_admin"),
-		PostgresPassword: envOr("POSTGRES_PASSWORD", "change_me"),
-		DBSystem:         envOr("POSTGRES_DB_SYSTEM", "system_db"),
-		DBUser:           envOr("POSTGRES_DB_USER", "user_db"),
-		RedisURL:         envOr("REDIS_URL", "redis://localhost:6379/0"),
-		MinioEndpoint:    envOr("MINIO_ENDPOINT", "localhost:9000"),
-		MinioAccessKey:   envOr("MINIO_ACCESS_KEY", "minio_admin"),
-		MinioSecretKey:   envOr("MINIO_SECRET_KEY", "change_me"),
-		MinioBucket:      envOr("MINIO_BUCKET", "uploads"),
-		SecretKey:        requiredEnv("SECRET_KEY"),
-		SessionTTL:       86400,
+func LoadConfig() (*Config, error) {
+	environment := strings.ToLower(strings.TrimSpace(envOr("APP_ENV", "production")))
+
+	listenAddr, err := environmentValue(environment, "API_LISTEN_ADDR", ":5000")
+	if err != nil {
+		return nil, err
 	}
+	postgresHost, err := environmentValue(environment, "POSTGRES_HOST", "localhost")
+	if err != nil {
+		return nil, err
+	}
+	postgresPort, err := environmentValue(environment, "POSTGRES_PORT", "5432")
+	if err != nil {
+		return nil, err
+	}
+	postgresUser, err := requiredEnv("POSTGRES_USER")
+	if err != nil {
+		return nil, err
+	}
+	postgresPassword, err := requiredEnv("POSTGRES_PASSWORD")
+	if err != nil {
+		return nil, err
+	}
+	postgresSSLMode, err := environmentValue(environment, "POSTGRES_SSLMODE", "disable")
+	if err != nil {
+		return nil, err
+	}
+	if !validPostgresSSLMode(postgresSSLMode) {
+		return nil, fmt.Errorf("POSTGRES_SSLMODE has unsupported value %q", postgresSSLMode)
+	}
+	dbSystem, err := environmentValue(environment, "POSTGRES_DB_SYSTEM", "system_db")
+	if err != nil {
+		return nil, err
+	}
+	dbUser, err := environmentValue(environment, "POSTGRES_DB_USER", "user_db")
+	if err != nil {
+		return nil, err
+	}
+	redisURL, err := environmentValue(environment, "REDIS_URL", "redis://localhost:6379/0")
+	if err != nil {
+		return nil, err
+	}
+	minioEndpoint, err := environmentValue(environment, "MINIO_ENDPOINT", "localhost:9000")
+	if err != nil {
+		return nil, err
+	}
+	minioAccessKey, err := requiredEnv("MINIO_ACCESS_KEY")
+	if err != nil {
+		return nil, err
+	}
+	minioSecretKey, err := requiredEnv("MINIO_SECRET_KEY")
+	if err != nil {
+		return nil, err
+	}
+	minioBucket, err := environmentValue(environment, "MINIO_BUCKET", "uploads")
+	if err != nil {
+		return nil, err
+	}
+	minioSecure, err := environmentBool(environment, "MINIO_SECURE", false)
+	if err != nil {
+		return nil, err
+	}
+	secretKey, err := requiredEnv("SECRET_KEY")
+	if err != nil {
+		return nil, err
+	}
+	sessionTTL, err := positiveEnvInt("SESSION_TTL_SECONDS", 86400)
+	if err != nil {
+		return nil, err
+	}
+	exposeVerificationCode, err := optionalEnvBool("EXPOSE_VERIFICATION_CODE", false)
+	if err != nil {
+		return nil, err
+	}
+
+	return &Config{
+		AppEnv:                environment,
+		ListenAddr:            listenAddr,
+		PostgresHost:          postgresHost,
+		PostgresPort:          postgresPort,
+		PostgresUser:          postgresUser,
+		PostgresPassword:      postgresPassword,
+		PostgresSSLMode:       postgresSSLMode,
+		DBSystem:              dbSystem,
+		DBUser:                dbUser,
+		RedisURL:              redisURL,
+		MinioEndpoint:         minioEndpoint,
+		MinioAccessKey:        minioAccessKey,
+		MinioSecretKey:        minioSecretKey,
+		MinioBucket:           minioBucket,
+		MinioSecure:           minioSecure,
+		SecretKey:             secretKey,
+		SessionTTL:            sessionTTL,
+		DebugVerificationCode: environment == "development" && exposeVerificationCode,
+	}, nil
+}
+
+func environmentValue(environment, key, developmentFallback string) (string, error) {
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value, nil
+	}
+	if environment == "development" || environment == "test" {
+		return developmentFallback, nil
+	}
+	return "", fmt.Errorf("%s is required when APP_ENV=%s", key, environment)
+}
+
+func requiredEnv(key string) (string, error) {
+	value := strings.TrimSpace(os.Getenv(key))
+	if value == "" {
+		return "", fmt.Errorf("%s is required", key)
+	}
+	return value, nil
 }
 
 func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+	if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+		return value
 	}
 	return fallback
 }
 
-func requiredEnv(key string) string {
-	v := os.Getenv(key)
-	if v == "" {
-		log.Fatalf("%s is required", key)
+func environmentBool(environment, key string, developmentFallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		if environment == "development" || environment == "test" {
+			return developmentFallback, nil
+		}
+		return false, fmt.Errorf("%s is required when APP_ENV=%s", key, environment)
 	}
-	return v
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean: %w", key, err)
+	}
+	return value, nil
+}
+
+func optionalEnvBool(key string, fallback bool) (bool, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("%s must be a boolean: %w", key, err)
+	}
+	return value, nil
+}
+
+func positiveEnvInt(key string, fallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive integer", key)
+	}
+	return value, nil
+}
+
+func validPostgresSSLMode(value string) bool {
+	switch value {
+	case "disable", "allow", "prefer", "require", "verify-ca", "verify-full":
+		return true
+	default:
+		return false
+	}
 }

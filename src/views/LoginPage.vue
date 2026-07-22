@@ -1,18 +1,25 @@
 <script setup lang="ts">
-import { computed, ref, shallowRef, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onBeforeMount, ref, shallowRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import {
+  ApiError,
   loginAccount,
   registerAccount,
   sendVerificationCode,
 } from '../api/backendApi'
+import { useSession } from '../composables/useSession'
 import { publicAsset } from '../utils/assets'
 
 const router = useRouter()
-const rememberedLoginEmailKey = 'type-wsp-login-email'
-const initialRememberedEmail = readRememberedLoginEmail()
+const route = useRoute()
+const {
+  currentUser,
+  isSessionInitialized,
+  restoreCurrentSession,
+  setCurrentSession,
+} = useSession()
 const mode = ref<'login' | 'register'>('login')
-const email = ref(initialRememberedEmail)
+const email = ref('')
 const loginPassword = ref('')
 const registerPassword = ref('')
 const username = ref('')
@@ -24,7 +31,8 @@ const errorMessage = ref('')
 const showLoginPassword = shallowRef(false)
 const showRegisterPassword = shallowRef(false)
 const showConfirmPassword = shallowRef(false)
-const rememberMe = shallowRef(initialRememberedEmail.length > 0)
+const rememberMe = shallowRef(false)
+const isCheckingSession = shallowRef(true)
 const authBackgroundStyle = {
   '--auth-background-image': `url("${publicAsset('picture/meme_background.jpg')}")`,
 }
@@ -61,36 +69,21 @@ const isRegisterPasswordMatched = computed(() =>
 const showRegisterPasswordMismatch = computed(() =>
   confirmPassword.value.length > 0 && registerPassword.value !== confirmPassword.value,
 )
-const isRegisterPasswordLongEnough = computed(() => registerPassword.value.length >= 8)
-const showRegisterPasswordLengthError = computed(() => hasRegisterPassword.value && !isRegisterPasswordLongEnough.value)
+const registerPasswordByteLength = computed(() => new TextEncoder().encode(registerPassword.value).length)
+const isRegisterPasswordStrong = computed(() =>
+  registerPasswordByteLength.value >= 8 &&
+  registerPasswordByteLength.value <= 72 &&
+  /\p{L}/u.test(registerPassword.value) &&
+  /\p{N}/u.test(registerPassword.value),
+)
+const showRegisterPasswordStrengthError = computed(() => hasRegisterPassword.value && !isRegisterPasswordStrong.value)
 const canRegister = computed(() =>
   isRegisterEmailValid.value &&
-  trimmedCode.value.length > 0 &&
+  /^\d{6}$/.test(trimmedCode.value) &&
   isRegisterUsernameValid.value &&
-  isRegisterPasswordLongEnough.value &&
+  isRegisterPasswordStrong.value &&
   isRegisterPasswordMatched.value,
 )
-
-function readRememberedLoginEmail() {
-  try {
-    return window.localStorage.getItem(rememberedLoginEmailKey) ?? ''
-  } catch {
-    return ''
-  }
-}
-
-function saveRememberedLoginEmail(value: string) {
-  try {
-    if (rememberMe.value) {
-      window.localStorage.setItem(rememberedLoginEmailKey, value)
-      return
-    }
-
-    window.localStorage.removeItem(rememberedLoginEmailKey)
-  } catch {
-    // localStorage can be unavailable in restricted browser modes.
-  }
-}
 
 watch(loginPassword, (value) => {
   if (value.length === 0) {
@@ -125,12 +118,31 @@ function setError(error: unknown) {
   errorMessage.value = error instanceof Error ? error.message : '操作失敗'
 }
 
+function setSessionCheckError(error: unknown) {
+  if (
+    route.query.sessionError === 'unavailable' ||
+    (error instanceof ApiError && (error.status === 429 || error.status === 503))
+  ) {
+    setFormError('登入服務暫時無法使用，請稍後再試')
+    return
+  }
+
+  setError(error)
+}
+
+function redirectAfterLogin() {
+  const redirect = route.query.redirect
+  return typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+    ? redirect
+    : '/home'
+}
+
 async function handleLogin() {
   isSubmitting.value = true
   try {
-    await loginAccount(trimmedEmail.value, loginPassword.value, rememberMe.value)
-    saveRememberedLoginEmail(trimmedEmail.value)
-    await router.push('/home')
+    const { user } = await loginAccount(trimmedEmail.value, loginPassword.value, rememberMe.value)
+    setCurrentSession(user)
+    await router.replace(redirectAfterLogin())
   } catch (error) {
     setError(error)
   } finally {
@@ -152,7 +164,7 @@ async function handleSendCode() {
   isSubmitting.value = true
   try {
     const response = await sendVerificationCode(trimmedEmail.value)
-    setStatus(response.debug_code ? `驗證碼已送出：${response.debug_code}` : response.message)
+    setStatus(response.message)
   } catch (error) {
     setError(error)
   } finally {
@@ -176,8 +188,8 @@ async function handleRegister() {
     return
   }
 
-  if (!isRegisterPasswordLongEnough.value) {
-    setFormError('密碼至少需要 8 個字元')
+  if (!isRegisterPasswordStrong.value) {
+    setFormError('密碼需為 8-72 bytes，且至少包含一個字母與一個數字')
     return
   }
 
@@ -202,30 +214,64 @@ async function handleRegister() {
     isSubmitting.value = false
   }
 }
+
+onBeforeMount(async () => {
+  try {
+    const shouldForceRefresh = isSessionInitialized.value && currentUser.value !== null
+    const user = await restoreCurrentSession({ force: shouldForceRefresh })
+    if (user) {
+      await router.replace(redirectAfterLogin())
+    }
+  } catch (error) {
+    setSessionCheckError(error)
+  } finally {
+    isCheckingSession.value = false
+  }
+})
 </script>
 
 <template>
-  <div class="auth-container" :style="authBackgroundStyle">
+  <div class="auth-container" :style="authBackgroundStyle" :aria-busy="isCheckingSession">
+    <p v-if="isCheckingSession" class="text-lg font-bold text-white" role="status" aria-live="polite">
+      正在確認登入狀態…
+    </p>
     <div
+      v-else
       id="slider"
       class="form-slider"
       :class="mode === 'register' ? '-translate-x-1/2' : 'translate-x-0'"
     >
-      <form id="loginForm" class="form-section" @submit.prevent="handleLogin">
+      <form
+        id="loginForm"
+        class="form-section"
+        :inert="mode !== 'login'"
+        :aria-hidden="mode !== 'login'"
+        @submit.prevent="handleLogin"
+      >
         <div class="input-group">
-          <div class="input-label">信箱</div>
-          <input v-model="email" type="email" class="input-field" placeholder="example@email.com" autocomplete="email">
+          <label class="input-label" for="login-email">信箱</label>
+          <input
+            id="login-email"
+            v-model="email"
+            name="email"
+            type="email"
+            class="input-field"
+            placeholder="example@email.com"
+            autocomplete="email"
+            spellcheck="false"
+          >
         </div>
 
         <div class="input-group">
-          <div class="input-label">密碼</div>
+          <label class="input-label" for="login-password">密碼</label>
           <input
+            id="login-password"
             v-model="loginPassword"
             :type="loginPasswordType"
             class="input-field"
             placeholder="請輸入密碼"
             autocomplete="current-password"
-            name="current-password"
+            name="password"
           >
           <button
             v-if="hasLoginPassword"
@@ -260,7 +306,12 @@ async function handleRegister() {
           </div>
         </div>
 
-        <div v-if="statusMessage || errorMessage" class="mb-5 w-full max-w-[550px] text-right text-sm font-bold text-white">
+        <div
+          v-if="statusMessage || errorMessage"
+          class="mb-5 w-full max-w-[550px] text-right text-sm font-bold text-white"
+          :role="errorMessage ? 'alert' : 'status'"
+          :aria-live="errorMessage ? 'assertive' : 'polite'"
+        >
           {{ errorMessage || statusMessage }}
         </div>
 
@@ -276,22 +327,27 @@ async function handleRegister() {
         id="registerForm"
         class="form-section register-form-section"
         :style="registerBackgroundStyle"
+        :inert="mode !== 'register'"
+        :aria-hidden="mode !== 'register'"
         @submit.prevent="handleRegister"
       >
         <div class="reg-group">
-          <div class="reg-label">電子信箱</div>
+          <label class="reg-label" for="register-email">電子信箱</label>
           <input
+            id="register-email"
             v-model="email"
+            name="register-email"
             type="email"
             class="reg-input"
             placeholder="example@email.com"
             autocomplete="email"
+            spellcheck="false"
             :aria-invalid="showRegisterEmailFormatError"
             :aria-describedby="showRegisterEmailFormatError ? 'register-email-feedback' : statusMessage || errorMessage ? 'register-feedback' : undefined"
           >
           <button
             type="button"
-            class="ml-3 shrink-0 rounded-full bg-[#a67c52] px-5 py-3 text-sm font-semibold text-white transition-all duration-300 hover:bg-nav disabled:cursor-not-allowed disabled:opacity-60 max-md:ml-0 max-md:mt-2 max-md:w-full"
+            class="ml-3 shrink-0 rounded-full bg-accent-earth px-5 py-3 text-sm font-semibold text-white transition-all duration-300 hover:bg-nav disabled:cursor-not-allowed disabled:opacity-60 max-md:ml-0 max-md:mt-2 max-md:w-full"
             :disabled="!canSendVerificationCode"
             @click="handleSendCode"
           >
@@ -306,17 +362,32 @@ async function handleRegister() {
           電子信箱格式不正確
         </p>
         <div class="reg-group">
-          <div class="reg-label">驗證碼</div>
-          <input v-model="code" type="text" class="reg-input" placeholder="請輸入驗證碼" autocomplete="one-time-code">
+          <label class="reg-label" for="register-code">驗證碼</label>
+          <input
+            id="register-code"
+            v-model="code"
+            name="verification-code"
+            type="text"
+            class="reg-input"
+            placeholder="請輸入 6 位驗證碼"
+            autocomplete="one-time-code"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            maxlength="6"
+            spellcheck="false"
+          >
         </div>
         <div class="reg-group">
-          <div class="reg-label">使用者名稱</div>
+          <label class="reg-label" for="register-username">使用者名稱</label>
           <input
+            id="register-username"
             v-model="username"
+            name="username"
             type="text"
             class="reg-input"
             placeholder="請輸入暱稱"
             autocomplete="username"
+            spellcheck="false"
             :aria-invalid="showRegisterUsernameError"
             :aria-describedby="showRegisterUsernameError ? 'register-username-feedback' : undefined"
           >
@@ -329,16 +400,17 @@ async function handleRegister() {
           使用者名稱需為 2-20 個字，且不能有空白
         </p>
         <div class="reg-group">
-          <div class="reg-label">密碼</div>
+          <label class="reg-label" for="register-password">密碼</label>
           <input
+            id="register-password"
             v-model="registerPassword"
             :type="registerPasswordType"
             class="reg-input"
             placeholder="至少 8 個字元"
             autocomplete="new-password"
             name="new-password"
-            :aria-invalid="showRegisterPasswordLengthError"
-            :aria-describedby="showRegisterPasswordLengthError ? 'register-password-length-feedback' : undefined"
+            :aria-invalid="showRegisterPasswordStrengthError"
+            :aria-describedby="showRegisterPasswordStrengthError ? 'register-password-strength-feedback' : undefined"
           >
           <button
             v-if="hasRegisterPassword"
@@ -362,15 +434,16 @@ async function handleRegister() {
           </button>
         </div>
         <p
-          v-if="showRegisterPasswordLengthError"
-          id="register-password-length-feedback"
+          v-if="showRegisterPasswordStrengthError"
+          id="register-password-strength-feedback"
           class="mb-4 w-full max-w-[650px] text-right text-sm font-bold text-red-600"
         >
-          密碼至少需要 8 個字元
+          密碼需為 8-72 bytes，且至少包含一個字母與一個數字
         </p>
         <div class="reg-group">
-          <div class="reg-label">確認密碼</div>
+          <label class="reg-label" for="confirm-password">確認密碼</label>
           <input
+            id="confirm-password"
             v-model="confirmPassword"
             :type="confirmPasswordType"
             class="reg-input"
@@ -417,7 +490,9 @@ async function handleRegister() {
           v-if="statusMessage || errorMessage"
           id="register-feedback"
           class="mt-5 text-sm font-bold"
-          :class="errorMessage || (statusMessage && statusMessage.includes('驗證碼已送出')) ? 'text-red-600' : 'text-[#4a3320]'"
+          :class="errorMessage || (statusMessage && statusMessage.includes('驗證碼已送出')) ? 'text-red-600' : 'text-brown'"
+          :role="errorMessage ? 'alert' : 'status'"
+          :aria-live="errorMessage ? 'assertive' : 'polite'"
         >
           {{ errorMessage || statusMessage }}
         </div>

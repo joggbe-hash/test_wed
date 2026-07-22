@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,10 +13,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/minio/minio-go/v7"
+	"typewsp/shared/contracts"
 )
 
 // Post 是 feed API 回給前端的貼文格式；image_urls 會是可直接載入的 API URL。
@@ -30,13 +33,50 @@ type Post struct {
 }
 
 const (
-	feedCacheKey       = "feed:latest"
-	feedCacheTTL       = 30 * time.Second
-	maxPostBodyBytes   = 40 << 20
-	maxMultipartMemory = 8 << 20
-	maxImageUploadSize = 8 << 20
-	maxImagesPerPost   = 4
+	feedCacheKey        = contracts.FeedCacheKey
+	feedCacheTTL        = 30 * time.Second
+	maxPostBodyBytes    = 25 << 20
+	maxPostContentRunes = 5000
+	maxMultipartMemory  = 8 << 20
+	maxImageUploadSize  = 8 << 20
+	maxImagesPerPost    = 4
 )
+
+type feedCursor struct {
+	CreatedAt time.Time
+	ID        int
+}
+
+func encodeFeedCursor(createdAt time.Time, id int) string {
+	raw := createdAt.UTC().Format(time.RFC3339Nano) + "|" + strconv.Itoa(id)
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+func decodeFeedCursor(raw string) (feedCursor, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return feedCursor{}, fmt.Errorf("decode cursor failed: %w", err)
+	}
+
+	parts := strings.Split(string(decoded), "|")
+	if len(parts) != 2 {
+		return feedCursor{}, fmt.Errorf("invalid cursor format")
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return feedCursor{}, fmt.Errorf("invalid cursor time: %w", err)
+	}
+	id, err := strconv.Atoi(parts[1])
+	if err != nil || id <= 0 {
+		return feedCursor{}, fmt.Errorf("invalid cursor id")
+	}
+
+	return feedCursor{CreatedAt: createdAt, ID: id}, nil
+}
+
+func validPostContent(content string) bool {
+	return utf8.ValidString(content) && utf8.RuneCountInString(content) <= maxPostContentRunes
+}
 
 // handleFeed 讀取最新 20 筆貼文。第一頁使用 Redis 快取，cursor 分頁直接查 DB。
 func handleFeed(w http.ResponseWriter, r *http.Request) {
@@ -54,14 +94,20 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 	var rows pgx.Rows
 	var err error
 	if cursor != "" {
+		parsedCursor, parseErr := decodeFeedCursor(cursor)
+		if parseErr != nil {
+			writeJSON(w, http.StatusBadRequest, M{"error": "invalid feed cursor"})
+			return
+		}
 		rows, err = systemPool.Query(ctx,
 			`SELECT id, user_id, username, content, image_url, image_status, created_at
-			 FROM posts WHERE created_at < $1
-			 ORDER BY created_at DESC LIMIT 20`, cursor)
+			 FROM posts
+			 WHERE created_at < $1 OR (created_at = $1 AND id < $2)
+			 ORDER BY created_at DESC, id DESC LIMIT 20`, parsedCursor.CreatedAt, parsedCursor.ID)
 	} else {
 		rows, err = systemPool.Query(ctx,
 			`SELECT id, user_id, username, content, image_url, image_status, created_at
-			 FROM posts ORDER BY created_at DESC LIMIT 20`)
+			 FROM posts ORDER BY created_at DESC, id DESC LIMIT 20`)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "load feed failed"})
@@ -91,10 +137,15 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 		}
 		posts = append(posts, p)
 	}
+	if err := rows.Err(); err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "load feed failed"})
+		return
+	}
 
 	var nextCursor string
 	if len(posts) == 20 {
-		nextCursor = posts[len(posts)-1].CreatedAt.Format(time.RFC3339Nano)
+		lastPost := posts[len(posts)-1]
+		nextCursor = encodeFeedCursor(lastPost.CreatedAt, lastPost.ID)
 	}
 
 	result := M{"posts": posts, "next_cursor": nextCursor}
@@ -127,8 +178,13 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, M{"error": "invalid JSON body"})
 			return
 		}
+		body.Content = strings.TrimSpace(body.Content)
 		if body.Content == "" {
 			writeJSON(w, http.StatusBadRequest, M{"error": "content is required"})
+			return
+		}
+		if !validPostContent(body.Content) {
+			writeJSON(w, http.StatusBadRequest, M{"error": "post content must be at most 5000 characters"})
 			return
 		}
 		createTextPost(ctx, w, user, body.Content)
@@ -145,7 +201,11 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 	defer closeFileEntries(files)
 
-	content := r.FormValue("content")
+	content := strings.TrimSpace(r.FormValue("content"))
+	if !validPostContent(content) {
+		writeJSON(w, http.StatusBadRequest, M{"error": "post content must be at most 5000 characters"})
+		return
+	}
 
 	if len(files) == 0 {
 		if content == "" {
@@ -168,18 +228,81 @@ func handleDeletePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	tag, err := systemPool.Exec(ctx, "DELETE FROM posts WHERE id = $1 AND user_id = $2", postID, user.ID)
+	var imageURLRaw *string
+	err = WithTx(ctx, systemPool, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx,
+			"SELECT image_url FROM posts WHERE id = $1 AND user_id = $2 FOR UPDATE",
+			postID, user.ID,
+		).Scan(&imageURLRaw); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, "DELETE FROM posts WHERE id = $1 AND user_id = $2", postID, user.ID)
+		return err
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeJSON(w, http.StatusNotFound, M{"error": "post not found"})
+		return
+	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "delete post failed"})
 		return
 	}
-	if tag.RowsAffected() == 0 {
-		writeJSON(w, http.StatusNotFound, M{"error": "post not found"})
-		return
+
+	imageKeys := managedImageKeys(imageURLRaw)
+	if len(imageKeys) > 0 {
+		if err := enqueueTask(ctx, contracts.TaskDeleteImages, M{"keys": imageKeys}); err != nil {
+			log.Printf("enqueue image cleanup failed for post %d: %v", postID, err)
+			removeImagesBestEffort(ctx, imageKeys)
+		}
 	}
 
 	rdb.Del(ctx, feedCacheKey)
 	writeJSON(w, http.StatusOK, M{"message": "post deleted"})
+}
+
+func managedImageKeys(raw *string) []string {
+	if raw == nil || *raw == "" {
+		return nil
+	}
+	var keys []string
+	if err := json.Unmarshal([]byte(*raw), &keys); err != nil {
+		return nil
+	}
+	validKeys := keys[:0]
+	for _, key := range keys {
+		if isManagedImageKey(key) {
+			validKeys = append(validKeys, key)
+		}
+	}
+	return validKeys
+}
+
+func isManagedImageKey(key string) bool {
+	if isProcessedImageKey(key) {
+		return true
+	}
+	if !strings.HasPrefix(key, contracts.RawImagePrefix) {
+		return false
+	}
+
+	name := strings.TrimPrefix(key, contracts.RawImagePrefix)
+	if name == "" || strings.Contains(name, "..") || strings.Contains(name, "/") || strings.ContainsAny(name, "\\\x00") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(name)) {
+	case ".jpg", ".jpeg", ".png":
+		return true
+	default:
+		return false
+	}
+}
+
+func removeImagesBestEffort(ctx context.Context, keys []string) {
+	for _, key := range keys {
+		if err := minioClient.RemoveObject(ctx, minioBucket, key, minio.RemoveObjectOptions{}); err != nil {
+			log.Printf("remove image object failed key=%s: %v", key, err)
+		}
+	}
 }
 
 type fileEntry struct {
@@ -293,14 +416,14 @@ func isMaxBytesError(err error) bool {
 }
 
 func isProcessedImageKey(key string) bool {
-	if !strings.HasPrefix(key, "processed/") {
+	if !strings.HasPrefix(key, contracts.ProcessedImagePrefix) {
 		return false
 	}
 	if strings.Contains(key, "..") || strings.ContainsAny(key, "\\\x00") {
 		return false
 	}
 
-	name := strings.TrimPrefix(key, "processed/")
+	name := strings.TrimPrefix(key, contracts.ProcessedImagePrefix)
 	if name == "" || strings.Contains(name, "/") {
 		return false
 	}
@@ -336,7 +459,7 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 
 	var rawKeys []string
 	for _, f := range files {
-		rawKey := fmt.Sprintf("raw/%s%s", uuid.New().String(), f.extension)
+		rawKey := fmt.Sprintf("%s%s%s", contracts.RawImagePrefix, uuid.New().String(), f.extension)
 		_, err := minioClient.PutObject(ctx, minioBucket, rawKey, f.reader, f.size,
 			minio.PutObjectOptions{ContentType: f.contentType})
 		if err != nil {
@@ -370,15 +493,11 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 		return e
 	})
 
-	job, _ := json.Marshal(M{
-		"type": "process_image_post",
-		"payload": M{
-			"post_id":  postID,
-			"user_id":  user.ID,
-			"raw_keys": rawKeys,
-		},
-	})
-	if err := rdb.RPush(ctx, "task_queue", job).Err(); err != nil {
+	if err := enqueueTask(ctx, contracts.TaskProcessImagePost, M{
+		"post_id":  postID,
+		"user_id":  user.ID,
+		"raw_keys": rawKeys,
+	}); err != nil {
 		ops.Execute()
 		writeJSON(w, http.StatusInternalServerError, M{"error": "enqueue image job failed"})
 		return

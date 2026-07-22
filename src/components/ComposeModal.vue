@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
 import { createPost, fetchFeed } from '../api/backendApi'
+import { useAccessibleDialog } from '../composables/useAccessibleDialog'
 import { closeComposeModal } from '../composables/useComposeModal'
 import { useFeedStore } from '../stores/useFeedStore'
 
@@ -17,6 +18,8 @@ const imagePreviews = ref<ImagePreview[]>([])
 const isSubmitting = ref(false)
 const errorMessage = ref('')
 const visibility = ref<'public' | 'private'>('public')
+const dialog = useTemplateRef<HTMLElement>('dialog')
+const cancelButton = useTemplateRef<HTMLButtonElement>('cancelButton')
 
 function revokeImagePreviews() {
   imagePreviews.value.forEach((preview) => URL.revokeObjectURL(preview.url))
@@ -51,6 +54,13 @@ function closeModal() {
   if (isSubmitting.value) return
   closeComposeModal()
 }
+
+useAccessibleDialog({
+  dialog,
+  initialFocus: cancelButton,
+  onClose: closeModal,
+  backgroundSelector: '[data-app-route-content]',
+})
 
 async function submitPost() {
   const trimmedContent = content.value.trim()
@@ -102,9 +112,16 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="compose-modal-backdrop" @click.self="closeModal">
-    <section class="compose-modal" role="dialog" aria-modal="true" aria-labelledby="compose-title">
+    <section
+      ref="dialog"
+      class="compose-modal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="compose-title"
+      tabindex="-1"
+    >
       <header class="compose-modal-header">
-        <button type="button" class="compose-modal-cancel" @click="closeModal">取消</button>
+        <button ref="cancelButton" type="button" class="compose-modal-cancel" @click="closeModal">取消</button>
         <div class="compose-modal-title-group">
           <h2 id="compose-title">建立貼文</h2>
         </div>
@@ -153,7 +170,7 @@ onBeforeUnmount(() => {
             class="compose-modal-textarea"
             placeholder="寫點今天想留下的事..."
             rows="5"
-            autofocus
+            maxlength="5000"
           ></textarea>
 
           <div
@@ -166,7 +183,7 @@ onBeforeUnmount(() => {
               :key="`${image.name}-${index}`"
               class="compose-media-tile"
             >
-              <img :src="image.url" :alt="image.name">
+              <img :src="image.url" :alt="image.name" width="1200" height="675">
               <button
                 type="button"
                 class="compose-remove-btn"
@@ -188,6 +205,7 @@ onBeforeUnmount(() => {
               class="sr-only"
               accept="image/*"
               multiple
+              aria-label="選擇最多四張貼文圖片"
               @change="handleImageChange"
             >
             <button type="button" aria-label="GIF"><span>GIF</span></button>
@@ -198,7 +216,7 @@ onBeforeUnmount(() => {
         </div>
       </div>
 
-      <p v-if="errorMessage" class="compose-modal-error">{{ errorMessage }}</p>
+      <p v-if="errorMessage" class="compose-modal-error" role="alert" aria-live="assertive">{{ errorMessage }}</p>
 
       <footer class="compose-modal-footer">
         <button type="button" class="compose-modal-options">

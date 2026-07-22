@@ -3,5 +3,8 @@
 skills-lock.json
 node_modules/
 dist/
+.go-build-cache/
+.env.local
+.env.*.local
 !Type-WSP-deploy/frontend/dist/
 !Type-WSP-deploy/frontend/dist/**

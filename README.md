@@ -17,6 +17,8 @@ npm install
 npm run dev
 ```
 
+開發模式會讀取 `.env.development`，預設啟用靜態 demo 資料。若要測試正式 API，可複製 `.env.example` 為 `.env.local`，設定 `VITE_API_BASE_URL` 並將 `VITE_USE_MOCK_API` 改為 `false`。
+
 Vite 會顯示本機網址，通常是：
 
 ```text
@@ -42,6 +44,16 @@ http://localhost:5173/
 cd Type-WSP-deploy
 copy .env.example .env
 cd ..
+```
+
+請至少更換 `.env` 裡的 PostgreSQL、Redis、MinIO 與 `SECRET_KEY`。`POSTGRES_SSLMODE=disable`、`MINIO_SECURE=false` 只適用於這份 Docker Compose 的內部網路；若改接外部服務，請啟用並驗證 TLS。
+
+部署到正式網域前，另以 `.env.local` 或 CI 環境變數設定：
+
+```text
+VITE_SITE_URL=https://your-domain.example/
+VITE_BASE_PATH=/
+VITE_USE_MOCK_API=false
 ```
 
 先把前端 build 到 Docker nginx 使用的資料夾：

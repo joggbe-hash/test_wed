@@ -26,14 +26,16 @@ function submitReminder() {
   const title = reminderForm.title.trim()
   if (!title) return
 
-  addReminder({
+  const saved = addReminder({
     title,
     date: reminderForm.date,
     time: reminderForm.time,
     note: reminderForm.note.trim(),
   })
-  reminderForm.title = ''
-  reminderForm.note = ''
+  if (saved) {
+    reminderForm.title = ''
+    reminderForm.note = ''
+  }
 }
 </script>
 

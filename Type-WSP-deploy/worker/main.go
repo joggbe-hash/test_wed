@@ -2,10 +2,11 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"time"
+	"net"
+	"net/url"
+	"os"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/minio/minio-go/v7"
@@ -20,12 +21,6 @@ var (
 	minioBucket string
 )
 
-// Task 是 Redis task_queue 裡的通用工作格式，Type 決定要解析成哪種 Payload。
-type Task struct {
-	Type    string          `json:"type"`
-	Payload json.RawMessage `json:"payload"`
-}
-
 // ImagePostPayload 由 API 建立圖文貼文後送進 queue，worker 負責處理 raw_keys。
 type ImagePostPayload struct {
 	PostID  int      `json:"post_id"`
@@ -39,8 +34,15 @@ type EmailPayload struct {
 	Code  string `json:"code"`
 }
 
+type ImageDeletePayload struct {
+	Keys []string `json:"keys"`
+}
+
 func main() {
-	cfg := LoadConfig()
+	cfg, err := LoadConfig()
+	if err != nil {
+		log.Fatalf("load worker config failed: %v", err)
+	}
 	ctx := context.Background()
 
 	opt, err := redis.ParseURL(cfg.RedisURL)
@@ -51,7 +53,7 @@ func main() {
 
 	minioClient, err = minio.New(cfg.MinioEndpoint, &minio.Options{
 		Creds:  minioCreds.NewStaticV4(cfg.MinioAccessKey, cfg.MinioSecretKey, ""),
-		Secure: false,
+		Secure: cfg.MinioSecure,
 	})
 	if err != nil {
 		log.Fatalf("connect MinIO failed: %v", err)
@@ -68,56 +70,40 @@ func main() {
 		}
 	}
 
-	dsn := fmt.Sprintf(
-		"postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		cfg.PostgresUser, cfg.PostgresPassword,
-		cfg.PostgresHost, cfg.PostgresPort, cfg.DBSystem,
-	)
+	dsn := workerPostgresDSN(cfg)
 	systemPool, err = pgxpool.New(ctx, dsn)
 	if err != nil {
 		log.Fatalf("connect system_db failed: %v", err)
 	}
 	defer systemPool.Close()
 
-	log.Println("Worker started, waiting for Redis tasks")
-
-	for {
-		result, err := rdb.BLPop(ctx, 0, "task_queue").Result()
-		if err != nil {
-			log.Printf("BLPop failed: %v", err)
-			time.Sleep(time.Second)
-			continue
-		}
-
-		var task Task
-		if err := json.Unmarshal([]byte(result[1]), &task); err != nil {
-			log.Printf("decode task failed: %v", err)
-			continue
-		}
-
-		switch task.Type {
-		case "process_image_post":
-			var payload ImagePostPayload
-			if err := json.Unmarshal(task.Payload, &payload); err != nil {
-				log.Printf("decode ImagePostPayload failed: %v", err)
-				continue
-			}
-			processImagePost(ctx, payload)
-
-		case "send_verification_email":
-			var payload EmailPayload
-			if err := json.Unmarshal(task.Payload, &payload); err != nil {
-				log.Printf("decode EmailPayload failed: %v", err)
-				continue
-			}
-			handleSendEmail(payload)
-
-		default:
-			log.Printf("unknown task type: %s", task.Type)
-		}
+	consumerName, err := os.Hostname()
+	if err != nil || consumerName == "" {
+		consumerName = fmt.Sprintf("worker-%d", os.Getpid())
+	}
+	log.Printf("Worker started, consumer=%s", consumerName)
+	if err := runTaskWorker(ctx, consumerName); err != nil {
+		log.Fatalf("task worker stopped: %v", err)
 	}
 }
 
-func handleSendEmail(payload EmailPayload) {
-	log.Printf("[email] send verification email to %s, code: %s", payload.Email, payload.Code)
+func workerPostgresDSN(cfg *Config) string {
+	dsn := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(cfg.PostgresUser, cfg.PostgresPassword),
+		Host:   net.JoinHostPort(cfg.PostgresHost, cfg.PostgresPort),
+		Path:   cfg.DBSystem,
+	}
+	query := dsn.Query()
+	query.Set("sslmode", cfg.PostgresSSLMode)
+	dsn.RawQuery = query.Encode()
+	return dsn.String()
+}
+
+func handleSendEmail(payload EmailPayload) error {
+	if payload.Email == "" || payload.Code == "" {
+		return fmt.Errorf("invalid email payload")
+	}
+	log.Printf("[email] verification email job accepted for %s", payload.Email)
+	return nil
 }

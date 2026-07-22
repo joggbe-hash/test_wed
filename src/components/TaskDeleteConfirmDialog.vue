@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, useTemplateRef } from 'vue'
-import type { TaskItem } from '../composables/useScheduleMock'
 
 const props = defineProps<{
-  task: Pick<TaskItem, 'id' | 'title'>
+  item: { id: number; title: string }
+  kind?: 'task' | 'reminder' | 'post'
+  returnFocusId?: string
+  confirmFocusId?: string
 }>()
 
 const emit = defineEmits<{
@@ -16,8 +18,14 @@ const cancelButton = useTemplateRef<HTMLButtonElement>('cancelButton')
 const titleId = 'task-delete-confirm-title'
 const descriptionId = 'task-delete-confirm-description'
 let previousActiveElement: HTMLElement | null = null
+let wasConfirmed = false
 
-const taskTitle = computed(() => props.task.title.trim() || '這個任務')
+const itemKindLabel = computed(() => {
+  if (props.kind === 'reminder') return '提醒'
+  if (props.kind === 'post') return '貼文'
+  return '任務'
+})
+const itemTitle = computed(() => props.item.title.trim() || `這個${itemKindLabel.value}`)
 
 function getFocusableElements() {
   const panel = dialogPanel.value
@@ -35,6 +43,7 @@ function closeDialog() {
 }
 
 function confirmDelete() {
+  wasConfirmed = true
   emit('confirm')
 }
 
@@ -80,7 +89,19 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleKeydown)
-  previousActiveElement?.focus()
+
+  const preferredFocusId = wasConfirmed
+    ? props.confirmFocusId ?? props.returnFocusId
+    : props.returnFocusId
+  const preferredFocusTarget = preferredFocusId
+    ? document.getElementById(preferredFocusId)
+    : null
+  const fallbackFocusTarget = previousActiveElement?.isConnected && previousActiveElement !== document.body
+    ? previousActiveElement
+    : null
+  const focusTarget = preferredFocusTarget ?? fallbackFocusTarget
+
+  focusTarget?.focus()
 })
 </script>
 
@@ -95,33 +116,40 @@ onBeforeUnmount(() => {
         :aria-labelledby="titleId"
         :aria-describedby="descriptionId"
       >
-        <div class="task-delete-content">
-          <span class="task-delete-kicker">確認刪除</span>
-          <h2 :id="titleId">要刪除這項任務嗎？</h2>
-          <div class="task-delete-task-card">
-            <span>今日任務</span>
-            <strong>{{ taskTitle }}</strong>
-          </div>
-          <p :id="descriptionId">
-            刪除後會從今日任務移除，這個動作不能復原。
-          </p>
-        </div>
-        <div class="task-delete-actions">
+        <header class="task-delete-header">
+          <h2 :id="titleId">確認刪除{{ itemKindLabel }}</h2>
           <button
-            ref="cancelButton"
             type="button"
-            class="task-delete-cancel"
+            class="task-delete-close"
+            aria-label="取消刪除"
             @click="closeDialog"
           >
-            取消
+            <span aria-hidden="true">&times;</span>
           </button>
-          <button
-            type="button"
-            class="task-delete-confirm"
-            @click="confirmDelete"
-          >
-            刪除
-          </button>
+        </header>
+
+        <div class="task-delete-content">
+          <p :id="descriptionId">
+            <template v-if="props.kind === 'post'">永久刪除貼文，將無法復原</template>
+            <template v-else>即將永久刪除{{ itemKindLabel }}「{{ itemTitle }}」，此動作無法復原。</template>
+          </p>
+          <div class="task-delete-actions">
+            <button
+              type="button"
+              class="task-delete-confirm"
+              @click="confirmDelete"
+            >
+              確定刪除
+            </button>
+            <button
+              ref="cancelButton"
+              type="button"
+              class="task-delete-cancel"
+              @click="closeDialog"
+            >
+              取消
+            </button>
+          </div>
         </div>
       </section>
     </div>

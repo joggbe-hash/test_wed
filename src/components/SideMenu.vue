@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
 import { publicAsset } from '../utils/assets'
 
 const props = defineProps<{
@@ -8,7 +8,6 @@ const props = defineProps<{
 }>()
 
 const route = useRoute()
-const router = useRouter()
 
 const items = [
   { label: '首頁', icon: 'home', iconSrc: publicAsset('icons/home.png'), to: '/home', activePaths: ['/home'] },
@@ -29,21 +28,23 @@ function isActive(paths: string[]) {
 
 <template>
   <nav class="side-menu" aria-label="主選單">
-    <button
+    <RouterLink
       v-for="item in visibleItems"
       :key="item.label"
-      type="button"
+      :to="item.to"
       class="side-menu-item"
       :class="{ 'side-menu-item-active': isActive(item.activePaths) }"
       :aria-label="compact ? item.label : undefined"
+      :aria-current="isActive(item.activePaths) ? 'page' : undefined"
       :title="compact ? item.label : undefined"
-      @click="router.push(item.to)"
     >
       <span class="side-menu-icon" aria-hidden="true">
         <img
           v-if="compact && item.iconSrc"
           :src="item.iconSrc"
-          :alt="item.label"
+          alt=""
+          width="32"
+          height="32"
           class="side-menu-image-icon"
         >
 
@@ -87,6 +88,6 @@ function isActive(paths: string[]) {
         <span v-else class="side-menu-avatar"></span>
       </span>
       <span v-if="!compact" class="side-menu-label">{{ item.label }}</span>
-    </button>
+    </RouterLink>
   </nav>
 </template>

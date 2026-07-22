@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import MainLayout from '../layouts/MainLayout.vue'
 import SidebarWidgets from '../components/SidebarWidgets.vue'
 import DateSelect from '../components/DateSelect.vue'
@@ -9,6 +9,7 @@ import { priorityMeta, type Priority, useScheduleMock } from '../composables/use
 const { todayKey, todayTasks, addTask, toggleTask, reorderTaskWithinPriority } = useScheduleMock()
 const draggingTaskId = ref<number | null>(null)
 const blockedDropId = ref<number | null>(null)
+let blockedDropTimer: number | undefined
 
 const taskForm = reactive({
   title: '',
@@ -31,26 +32,39 @@ function submitTask() {
   const title = taskForm.title.trim()
   if (!title) return
 
-  addTask({
+  const saved = addTask({
     title,
     date: taskForm.date,
     time: taskForm.time,
     priority: taskForm.priority,
   })
-  taskForm.title = ''
+  if (saved) taskForm.title = ''
 }
 
 function handleTaskDrop(targetId: number) {
   if (draggingTaskId.value === null) return
+
+  if (blockedDropTimer !== undefined) {
+    window.clearTimeout(blockedDropTimer)
+    blockedDropTimer = undefined
+  }
+
   const changed = reorderTaskWithinPriority(draggingTaskId.value, targetId)
   blockedDropId.value = changed ? null : targetId
   draggingTaskId.value = null
   if (!changed) {
-    window.setTimeout(() => {
+    blockedDropTimer = window.setTimeout(() => {
       blockedDropId.value = null
+      blockedDropTimer = undefined
     }, 700)
   }
 }
+
+onBeforeUnmount(() => {
+  if (blockedDropTimer !== undefined) {
+    window.clearTimeout(blockedDropTimer)
+  }
+})
 </script>
 
 <template>

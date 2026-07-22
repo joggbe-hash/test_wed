@@ -1,37 +1,62 @@
 <script setup lang="ts">
-import { watch } from 'vue'
+import { computed, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { RouterView } from 'vue-router'
 import ComposeModal from './components/ComposeModal.vue'
 import DailyTaskPrompt from './components/DailyTaskPrompt.vue'
+import LegacyScheduleImportDialog from './components/LegacyScheduleImportDialog.vue'
 import IntroducePage from './views/IntroducePage.vue'
 import { showComposeModal } from './composables/useComposeModal'
 import { maybeOpenDailyTaskPrompt, showDailyTaskPrompt } from './composables/useDailyTaskPrompt'
 import { showIntroduceModal } from './composables/useModal'
+import { useScheduleMock } from './composables/useScheduleMock'
 
 const route = useRoute()
+const { isLegacyScheduleDecisionPending, isScheduleReady, scheduleErrorMessage } = useScheduleMock()
+const isRoutedContentInactive = computed(() =>
+  showComposeModal.value
+    || showIntroduceModal.value
+    || showDailyTaskPrompt.value
+    || isLegacyScheduleDecisionPending.value,
+)
 
 watch(
-  () => route.path,
-  (path) => {
-    maybeOpenDailyTaskPrompt(path)
+  () => [route.path, isScheduleReady.value] as const,
+  ([path, scheduleReady]) => {
+    maybeOpenDailyTaskPrompt(path, scheduleReady)
   },
   { immediate: true },
 )
 </script>
 
 <template>
-  <RouterView v-slot="{ Component, route }">
-    <transition name="page-slide" mode="out-in">
-      <component :is="Component" :key="route.path" />
-    </transition>
-  </RouterView>
-  
+  <div
+    data-app-route-content
+    :inert="isRoutedContentInactive"
+    :aria-hidden="isRoutedContentInactive ? 'true' : undefined"
+    tabindex="-1"
+  >
+    <RouterView v-slot="{ Component, route }">
+      <transition name="page-slide" mode="out-in">
+        <component :is="Component" :key="route.path" />
+      </transition>
+    </RouterView>
+
+  </div>
+
   <transition name="page-slide">
     <IntroducePage v-if="showIntroduceModal" overlay />
   </transition>
-
   <ComposeModal v-if="showComposeModal" />
+  <LegacyScheduleImportDialog v-if="isLegacyScheduleDecisionPending" />
   <DailyTaskPrompt v-if="showDailyTaskPrompt" />
+  <p
+    v-if="scheduleErrorMessage"
+    class="schedule-storage-error"
+    role="alert"
+    aria-live="assertive"
+  >
+    {{ scheduleErrorMessage }}
+  </p>
 </template>
 
