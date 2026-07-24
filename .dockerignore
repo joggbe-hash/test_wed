@@ -1,0 +1,15 @@
+.git
+.github
+.agents
+.codex
+.go-build-cache
+node_modules
+dist
+coverage
+playwright-report
+test-results
+outputs
+Type-WSP-deploy/frontend/dist
+Type-WSP-deploy/.env
+Type-WSP-deploy/.env.local
+V2_PERFORMANCE_OPTIMIZATION.md

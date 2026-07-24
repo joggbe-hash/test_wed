@@ -1,20 +1,25 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
+import { publicAsset } from '../utils/assets'
+
+const props = defineProps<{
+  compact?: boolean
+}>()
 
 const route = useRoute()
-const router = useRouter()
 
 const items = [
-  { label: '首頁', icon: 'home', to: '/home', activePaths: ['/home'] },
-  { label: '訊息', icon: 'chat', to: '/social', activePaths: [] },
-  { label: '搜尋', icon: 'search', to: '/explore', activePaths: [] },
-  { label: '探索', icon: 'compass', to: '/explore', activePaths: ['/explore'] },
-  { label: '通知', icon: 'notifications', to: '/freq', activePaths: ['/freq'] },
-  { label: '個人檔案', icon: 'profile', to: '/personal', activePaths: ['/personal'] },
+  { label: '首頁', icon: 'home', iconSrc: publicAsset('icons/home.png'), to: '/home', activePaths: ['/home'] },
+  { label: '聊天', icon: 'chat', iconSrc: publicAsset('icons/chat.png'), to: '/social', activePaths: [] },
+  { label: '搜尋', icon: 'search', iconSrc: publicAsset('icons/search.png'), to: '/explore', activePaths: [] },
+  { label: '探索', icon: 'compass', iconSrc: publicAsset('icons/explore.png'), to: '/explore', activePaths: ['/explore'] },
+  { label: '通知', icon: 'notifications', iconSrc: '', to: '/freq', activePaths: ['/freq'] },
+  { label: '個人資料', icon: 'profile', iconSrc: '', to: '/personal', activePaths: ['/personal'] },
 ]
 
 const activePath = computed(() => route.path)
+const visibleItems = computed(() => (props.compact ? items.slice(0, 4) : items))
 
 function isActive(paths: string[]) {
   return paths.includes(activePath.value)
@@ -22,18 +27,29 @@ function isActive(paths: string[]) {
 </script>
 
 <template>
-  <nav class="side-menu" aria-label="主要功能">
-    <button
-      v-for="item in items"
+  <nav class="side-menu" aria-label="主選單">
+    <RouterLink
+      v-for="item in visibleItems"
       :key="item.label"
-      type="button"
+      :to="item.to"
       class="side-menu-item"
       :class="{ 'side-menu-item-active': isActive(item.activePaths) }"
-      @click="router.push(item.to)"
+      :aria-label="compact ? item.label : undefined"
+      :aria-current="isActive(item.activePaths) ? 'page' : undefined"
+      :title="compact ? item.label : undefined"
     >
       <span class="side-menu-icon" aria-hidden="true">
+        <img
+          v-if="compact && item.iconSrc"
+          :src="item.iconSrc"
+          alt=""
+          width="32"
+          height="32"
+          class="side-menu-image-icon"
+        >
+
         <svg
-          v-if="item.icon === 'home'"
+          v-else-if="item.icon === 'home'"
           viewBox="0 0 24 24"
           :fill="isActive(item.activePaths) ? 'currentColor' : 'none'"
           stroke="currentColor"
@@ -61,18 +77,9 @@ function isActive(paths: string[]) {
           <path d="m16.5 16.5 4 4" />
         </svg>
 
-        <svg
-          v-else-if="item.icon === 'compass'"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2.1"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        >
-          <circle cx="12" cy="12" r="9" />
-          <path d="m15.4 8.6-2.1 5.1-4.7 1.7 2.1-5.1z" />
-        </svg>
+        <span v-else-if="item.icon === 'compass'" class="material-symbols-outlined">
+          explore
+        </span>
 
         <span v-else-if="item.icon === 'notifications'" class="material-symbols-outlined">
           notifications
@@ -80,7 +87,7 @@ function isActive(paths: string[]) {
 
         <span v-else class="side-menu-avatar"></span>
       </span>
-      <span class="side-menu-label">{{ item.label }}</span>
-    </button>
+      <span v-if="!compact" class="side-menu-label">{{ item.label }}</span>
+    </RouterLink>
   </nav>
 </template>

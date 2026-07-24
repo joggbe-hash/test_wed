@@ -1,29 +1,20 @@
 import { createApp } from 'vue'
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createPinia } from 'pinia'
 import App from './App.vue'
 import './style.css'
-import LoginPage from './views/LoginPage.vue'
-import FirstPage from './views/FirstPage.vue'
-import ExplorePage from './views/ExplorePage.vue'
-import PersonalPage from './views/PersonalPage.vue'
-import FreqPage from './views/FreqPage.vue'
-import IntroducePage from './views/IntroducePage.vue'
-import SocialPage from './views/SocialPage.vue'
+import router from './router'
+import { setUnauthorizedHandler } from './api/unauthorizedHandler'
 
-const routes = [
-  { path: '/', redirect: '/login' },
-  { path: '/login', component: LoginPage },
-  { path: '/home', component: FirstPage },
-  { path: '/explore', component: ExplorePage },
-  { path: '/personal', component: PersonalPage },
-  { path: '/freq', component: FreqPage },
-  { path: '/introduce', component: IntroducePage },
-  { path: '/social', component: SocialPage },
-]
+const app = createApp(App)
+app.use(createPinia())
+app.use(router)
 
-const router = createRouter({
-  history: createWebHashHistory(),
-  routes,
+setUnauthorizedHandler(async () => {
+  const currentRoute = router.currentRoute.value
+  await router.push({
+    path: '/login',
+    query: currentRoute.path === '/login' ? {} : { redirect: currentRoute.fullPath },
+  })
 })
 
-createApp(App).use(router).mount('#app')
+app.mount('#app')

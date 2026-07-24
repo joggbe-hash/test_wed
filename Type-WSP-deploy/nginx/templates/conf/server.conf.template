@@ -1,0 +1,162 @@
+# ======================================================
+# 此檔案會被 OWASP CRS 映像的 envsubst 處理
+# 變數 ${VAR} 會在容器啟動時被 docker-compose 的 environment 值取代
+# 若是 nginx 自身的變數 (如 $host, $remote_addr),請用 ${DOLLAR}host 避免被 envsubst 吃掉
+# ======================================================
+
+# --- 全局速率限制區 (防爆流量打 Redis,對應圖中「炸了全服務會延遲」的風險) ---
+limit_req_zone ${DOLLAR}binary_remote_addr zone=api_general:10m rate=30r/s;
+# 帳密與驗證碼端點使用的嚴格 limiter。
+limit_req_zone ${DOLLAR}binary_remote_addr zone=api_login:10m rate=5r/m;
+limit_conn_zone ${DOLLAR}binary_remote_addr zone=perip:10m;
+
+# --- 上游後端 (api server) ---
+upstream api_backend {
+    server ${BACKEND_HOST}:${BACKEND_PORT} max_fails=3 fail_timeout=10s;
+    keepalive 32;
+}
+
+# --- HTTP -> HTTPS 強制重導 ---
+server {
+    listen ${PORT} default_server;
+    listen [::]:${PORT} default_server;
+    server_name ${SERVER_NAME};
+
+    # Let's Encrypt ACME challenge (若日後用 certbot)
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://${DOLLAR}host${DOLLAR}request_uri;
+    }
+}
+
+# --- HTTPS 主服務 ---
+server {
+    listen ${SSL_PORT} ssl default_server;
+    listen [::]:${SSL_PORT} ssl default_server;
+    http2 on;
+    server_name ${SERVER_NAME};
+
+    # --- SSL 憑證 ---
+    ssl_certificate     /etc/nginx/certs/fullchain.pem;
+    ssl_certificate_key /etc/nginx/certs/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # --- 安全標頭 ---
+    add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+    # CSP 依前端實際需求調整,這是基本款
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';" always;
+
+    # --- 連線限制 ---
+    limit_conn perip 50;
+
+    # --- 客戶端上傳限制 (社群服務要上傳圖片/影片,給大一點) ---
+    client_max_body_size 25m;
+    client_body_timeout  60s;
+    client_header_timeout 10s;
+
+    # --- 日誌 ---
+    access_log /var/log/nginx/access.log main;
+    error_log  /var/log/nginx/error.log warn;
+
+    # --- Gzip ---
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css text/xml application/json application/javascript application/xml+rss;
+
+    # ======================================================
+    # 路由 1: /api/* -> 反向代理到 api server (port 5000)
+    # ======================================================
+    location /api/ {
+        limit_req zone=api_general burst=60 nodelay;
+
+        proxy_pass         http://api_backend/;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
+        proxy_set_header   X-Forwarded-For   ${DOLLAR}proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
+        proxy_set_header   Connection        "";
+
+        proxy_connect_timeout 5s;
+        proxy_send_timeout    30s;
+        proxy_read_timeout    30s;
+
+        proxy_buffering       on;
+        proxy_buffer_size     4k;
+        proxy_buffers         8 16k;
+    }
+
+    # --- 帳密與驗證碼端點加嚴格限流 (防暴力破解) ---
+    # session/logout 是正常登入生命週期流量，保留在一般 API limiter。
+    location ~ ^/api/auth/(login|register|send-code)$ {
+        limit_req zone=api_login burst=10 nodelay;
+        limit_req_status 429;
+
+        proxy_pass         http://api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
+        proxy_set_header   X-Forwarded-For   ${DOLLAR}proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
+    }
+
+    # --- WebSocket 支援 (社群服務常需要推播/聊天) ---
+    location /api/ws/ {
+        proxy_pass         http://api_backend;
+        proxy_http_version 1.1;
+        proxy_set_header   Upgrade           ${DOLLAR}http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
+        proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
+        proxy_read_timeout 3600s;
+    }
+
+    # ======================================================
+    # 路由 2: / -> 前端 SPA 靜態檔 (mount ./frontend/dist)
+    # ======================================================
+    location / {
+        root /usr/share/nginx/html;
+        try_files ${DOLLAR}uri ${DOLLAR}uri/ /index.html;
+
+        # SPA 靜態資源快取
+        location ~* \.(?:css|js|woff2?|ttf|eot|otf|svg|png|jpg|jpeg|gif|webp|ico)$ {
+            root /usr/share/nginx/html;
+            expires 30d;
+            add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
+            add_header X-Content-Type-Options "nosniff" always;
+            add_header X-Frame-Options "SAMEORIGIN" always;
+            add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+            add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+            add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';" always;
+            add_header Cache-Control "public, immutable";
+            access_log off;
+        }
+    }
+
+    # --- 健康檢查端點 ---
+    location = /healthz {
+        access_log off;
+        return 200 "ok\n";
+        add_header Content-Type text/plain;
+    }
+
+    # --- 隱藏敏感檔案 ---
+    location ~ /\.(ht|git|env) {
+        deny all;
+        return 404;
+    }
+}

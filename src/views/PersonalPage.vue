@@ -1,70 +1,54 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import AppNavbar from '../components/AppNavbar.vue'
+import { deletePost } from '../api/backendApi'
+import AccessibleImageViewer from '../components/AccessibleImageViewer.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
-import PostActions from '../components/PostActions.vue'
-import { fetchPersonalData } from '../api/timedApi'
+import SidebarWidgets from '../components/SidebarWidgets.vue'
+import XPostCard from '../components/XPostCard.vue'
+import MainLayout from '../layouts/MainLayout.vue'
+import { useFeedStore } from '../stores/useFeedStore'
 
-const isLoading = ref(true)
-const profile = ref({ id: '', bio: '' })
-const posts = ref<string[]>([])
-const timer = ref('')
+const feedStore = useFeedStore()
+const openPostMenuId = ref<number | null>(null)
+const imageViewer = ref<{ urls: string[], index: number } | null>(null)
+
+function openImageViewer(urls: string[], index: number) {
+  imageViewer.value = { urls, index }
+}
+
+async function handleDeletePost(postId: number) {
+  try {
+    await deletePost(postId)
+    feedStore.removePost(postId)
+    openPostMenuId.value = null
+  } catch (error) {
+    console.error('刪除貼文失敗', error)
+  }
+}
 
 onMounted(async () => {
-  isLoading.value = true
-  const response = await fetchPersonalData()
-  profile.value = response.data.profile
-  posts.value = response.data.posts
-  timer.value = response.data.timer
-  isLoading.value = false
+  if (!feedStore.isLoaded) await feedStore.loadPosts()
 })
 </script>
 
 <template>
-  <div class="app-container">
-    <AppNavbar active="personal" />
-    <div class="main-layout">
-      <div class="sidebar"></div>
+  <MainLayout active-nav="personal">
+    <template #sidebar><SidebarWidgets /></template>
 
-      <div class="feed-content">
-        <LoadingPanel v-if="isLoading" />
+    <LoadingPanel v-if="feedStore.isLoading" />
+    <template v-else>
+      <XPostCard
+        v-for="post in feedStore.posts"
+        :key="`px-${post.id}`"
+        :post="post"
+        :is-menu-open="openPostMenuId === post.id"
+        @open-profile="() => {}"
+        @toggle-menu="openPostMenuId = openPostMenuId === $event ? null : $event"
+        @delete-post="handleDeletePost"
+        @open-image="openImageViewer"
+      />
+    </template>
 
-        <template v-else>
-          <div class="post-card show">
-            <div class="post-avatar"></div>
-            <div class="post-body">
-              <div class="post-user-id text-[#333333]">{{ profile.id }}</div>
-              <div class="mb-[30px] text-base leading-[1.6] text-[#333333]">{{ profile.bio }}</div>
-              <div class="flex gap-[15px]">
-                <button class="profile-btn">編輯個人資料</button>
-                <button class="profile-btn">分享個人資料</button>
-              </div>
-            </div>
-          </div>
-
-          <div v-for="post in posts" :key="post" class="post-card show">
-            <div class="post-avatar"></div>
-            <div class="flex min-w-0 flex-1 flex-col">
-              <div class="post-body">
-                <div class="text-base leading-[1.6] text-[#333333]">{{ post }}</div>
-              </div>
-              <PostActions />
-            </div>
-          </div>
-
-          <div class="post-card show">
-            <div class="post-avatar black"></div>
-            <div class="flex min-w-0 flex-1 flex-col">
-              <div class="post-body">
-                <div class="mb-5 text-[32px] font-bold tracking-[2px]">{{ timer }}</div>
-                <div class="h-[250px] w-full rounded bg-[#a0a0a0]"></div>
-              </div>
-              <PostActions />
-            </div>
-          </div>
-        </template>
-      </div>
-    </div>
-    <div class="fab"></div>
-  </div>
+    <AccessibleImageViewer v-if="imageViewer" v-model:index="imageViewer.index" :urls="imageViewer.urls" @close="imageViewer = null" />
+  </MainLayout>
 </template>
