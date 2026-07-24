@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, shallowRef, useTemplateRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, shallowRef, useTemplateRef, watch } from 'vue'
 import {
-  type Priority,
   type ReminderItem,
   type TaskItem,
   useScheduleMock,
 } from '../composables/useScheduleMock'
-import { formatLocalDateKey } from '../utils/date'
+import {
+  focusWithoutScroll,
+  isUsableFocusTarget,
+  trapDialogFocus,
+} from '../composables/useDialogFocusTrap'
+import { useDateScheduleEditor } from '../features/schedule/useDateScheduleEditor'
 import DailyTaskPrompt from './DailyTaskPrompt.vue'
 import DateScheduleItems from './DateScheduleItems.vue'
 import DateScheduleReminderEditor from './DateScheduleReminderEditor.vue'
@@ -22,33 +26,12 @@ const emit = defineEmits<{
   close: []
   'update:dateKey': [value: string]
 }>()
-const {
-  sortedTasks,
-  sortedReminders,
-  addReminder,
-  updateTask,
-  deleteTask,
-  updateReminder,
-  deleteReminder,
-} = useScheduleMock()
+const { deleteTask, deleteReminder } = useScheduleMock()
 
-type EditingKind = 'task' | 'reminder' | 'new-reminder'
 type PendingDelete =
   | { kind: 'task'; item: TaskItem }
   | { kind: 'reminder'; item: ReminderItem }
-const editingKind = shallowRef<EditingKind | null>(null)
-const editingId = shallowRef<number | null>(null)
-const isDailyTaskPromptOpen = shallowRef(false)
-const taskPromptEditId = shallowRef<number | null>(null)
 const pendingDelete = shallowRef<PendingDelete | null>(null)
-const editForm = reactive({
-  title: '',
-  note: '',
-  priority: 'medium' as Priority,
-  date: props.dateKey,
-  startTime: '08:00',
-  endTime: '09:00',
-})
 const dateScheduleModal = useTemplateRef<HTMLElement>('dateScheduleModal')
 const dateScheduleClose = useTemplateRef<HTMLButtonElement>('dateScheduleClose')
 const reminderEditor = useTemplateRef<InstanceType<typeof DateScheduleReminderEditor>>('reminderEditor')
@@ -58,103 +41,44 @@ let outerReturnFocus = typeof document !== 'undefined' && document.activeElement
 let reminderEditorReturnFocus: HTMLElement | null = null
 let reminderEditorReturnId: number | null = null
 let pendingDeleteReturnFocus: HTMLElement | null = null
-function parseDateKey(dateKey: string) {
-  const [year, month, day] = dateKey.split('-').map(Number)
-  return new Date(year, month - 1, day)
-}
 
-const selectedDate = computed(() => parseDateKey(props.dateKey))
-const selectedDay = computed(() => selectedDate.value.getDate())
-const selectedLabel = computed(() =>
-  new Intl.DateTimeFormat('zh-TW', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    weekday: 'short',
-  }).format(selectedDate.value),
-)
-const reminderEditorDateKey = computed(() => editForm.date || props.dateKey)
-const reminderEditorDate = computed(() => parseDateKey(reminderEditorDateKey.value))
-const reminderEditorDay = computed(() => reminderEditorDate.value.getDate())
-const reminderEditorDateLabel = computed(() => formatReminderDateLabel(reminderEditorDateKey.value))
-
-const dateReminders = computed(() =>
-  sortedReminders.value.filter((reminder) => reminder.date === props.dateKey),
-)
-const dateTasks = computed(() =>
-  sortedTasks.value.filter((task) => task.date === props.dateKey),
-)
-
-const isReminderForm = computed(() => editingKind.value === 'reminder' || editingKind.value === 'new-reminder')
-const isTaskEditPanelOpen = computed(() => editingKind.value === 'task')
-const isReminderEditorOpen = computed(() => isReminderForm.value)
+const {
+  editingKind,
+  isDailyTaskPromptOpen,
+  taskPromptEditId,
+  editForm,
+  selectedDay,
+  selectedLabel,
+  reminderEditorDay,
+  reminderEditorDateLabel,
+  dateReminders,
+  dateTasks,
+  isTaskEditPanelOpen,
+  isReminderEditorOpen,
+  editPanelTitle,
+  shiftDate,
+  startAddReminder,
+  startEditReminder,
+  openRequestedReminderEditor,
+  startEditTask,
+  openAddTaskPrompt,
+  closeTaskPrompt,
+  cancelEdit,
+  saveReminderAndCreateNext,
+  saveEdit,
+} = useDateScheduleEditor({
+  props,
+  close: () => emit('close'),
+  updateDateKey: (value) => emit('update:dateKey', value),
+  rememberReminderEditorTrigger,
+  focusReminderEditor,
+})
 const isOuterDialogInert = computed(() =>
   isReminderEditorOpen.value || isDailyTaskPromptOpen.value,
 )
 const isOuterDialogInactive = computed(() =>
   isOuterDialogInert.value || pendingDelete.value !== null,
 )
-const editPanelTitle = computed(() => {
-  if (editingKind.value === 'new-reminder') return '新增提醒'
-  if (editingKind.value === 'reminder') return '編輯提醒'
-  return '編輯任務'
-})
-
-const focusableSelector = [
-  'button:not([disabled])',
-  '[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(', ')
-
-function isUsableFocusTarget(element: HTMLElement | null): element is HTMLElement {
-  return Boolean(element && element.isConnected && element !== document.body)
-}
-
-function focusWithoutScroll(element: HTMLElement | null) {
-  if (!isUsableFocusTarget(element)) return
-  element.focus({ preventScroll: true })
-}
-
-function getFocusableElements(panel: HTMLElement | null) {
-  if (!panel) return []
-
-  return Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector))
-    .filter((element) => element.getClientRects().length > 0)
-}
-
-function trapDialogFocus(event: KeyboardEvent, panel: HTMLElement | null) {
-  const focusableElements = getFocusableElements(panel)
-  if (!panel || focusableElements.length === 0) {
-    event.preventDefault()
-    focusWithoutScroll(panel)
-    return
-  }
-
-  const firstElement = focusableElements[0]
-  const lastElement = focusableElements[focusableElements.length - 1]
-  const activeElement = document.activeElement
-
-  if (!(activeElement instanceof Node) || !panel.contains(activeElement)) {
-    event.preventDefault()
-    focusWithoutScroll(event.shiftKey ? lastElement : firstElement)
-    return
-  }
-
-  if (event.shiftKey && activeElement === firstElement) {
-    event.preventDefault()
-    focusWithoutScroll(lastElement)
-    return
-  }
-
-  if (!event.shiftKey && activeElement === lastElement) {
-    event.preventDefault()
-    focusWithoutScroll(firstElement)
-  }
-}
-
 function handleOuterDialogTab(event: KeyboardEvent) {
   trapDialogFocus(event, dateScheduleModal.value)
 }
@@ -210,169 +134,6 @@ function resolveOuterReturnFocus() {
   return document.querySelector<HTMLElement>(
     `[aria-label="查看 ${props.dateKey} 的行程"]`,
   )
-}
-
-function formatReminderDateLabel(dateKey: string) {
-  return new Intl.DateTimeFormat('zh-TW', {
-    month: 'numeric',
-    day: 'numeric',
-    weekday: 'short',
-  }).format(parseDateKey(dateKey))
-}
-
-function addMinutesToTime(time: string, minutesToAdd: number) {
-  const [rawHours = 0, rawMinutes = 0] = time.split(':').map(Number)
-  const totalMinutes = ((rawHours * 60 + rawMinutes + minutesToAdd) % 1440 + 1440) % 1440
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
-
-  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
-}
-
-function defaultReminderEndTime(startTime: string) {
-  return addMinutesToTime(startTime || '08:00', 60)
-}
-
-function shiftDate(offset: number) {
-  const nextDate = parseDateKey(props.dateKey)
-  nextDate.setDate(nextDate.getDate() + offset)
-  cancelEdit()
-  emit('update:dateKey', formatLocalDateKey(nextDate))
-}
-
-function startAddReminder() {
-  rememberReminderEditorTrigger(null)
-  editingKind.value = 'new-reminder'
-  editingId.value = null
-  editForm.title = ''
-  editForm.note = ''
-  editForm.priority = 'medium'
-  editForm.date = props.dateKey
-  editForm.startTime = '08:00'
-  editForm.endTime = defaultReminderEndTime(editForm.startTime)
-}
-
-function startEditReminder(reminder: ReminderItem) {
-  rememberReminderEditorTrigger(reminder.id)
-  editingKind.value = 'reminder'
-  editingId.value = reminder.id
-  editForm.title = reminder.title
-  editForm.note = reminder.note
-  editForm.priority = 'medium'
-  editForm.date = reminder.date
-  editForm.startTime = reminder.time
-  editForm.endTime = reminder.endTime ?? defaultReminderEndTime(reminder.time)
-}
-
-function openRequestedReminderEditor() {
-  const reminderId = props.editReminderId
-  if (reminderId === undefined || reminderId === null) return false
-
-  const reminder = sortedReminders.value.find((item) => item.id === reminderId)
-  if (!reminder) {
-    emit('close')
-    return true
-  }
-
-  startEditReminder(reminder)
-  return true
-}
-
-function startEditTask(task: TaskItem) {
-  cancelEdit()
-  taskPromptEditId.value = task.id
-  isDailyTaskPromptOpen.value = true
-}
-
-function openAddTaskPrompt() {
-  cancelEdit()
-  taskPromptEditId.value = null
-  isDailyTaskPromptOpen.value = true
-}
-
-function closeTaskPrompt() {
-  isDailyTaskPromptOpen.value = false
-  taskPromptEditId.value = null
-}
-
-function cancelEdit() {
-  editingKind.value = null
-  editingId.value = null
-}
-
-function saveReminder(closeAfterSave = true) {
-  const kind = editingKind.value
-  const title = editForm.title.trim()
-  if (!kind || !isReminderForm.value || !title) return false
-
-  const date = editForm.date || props.dateKey
-  const startTime = editForm.startTime || '08:00'
-  const endTime = !editForm.endTime || editForm.endTime <= startTime
-    ? defaultReminderEndTime(startTime)
-    : editForm.endTime
-
-  let saved = false
-  if (kind === 'new-reminder') {
-    saved = addReminder({
-      title,
-      date,
-      time: startTime,
-      endTime,
-      note: editForm.note.trim(),
-    })
-  } else {
-    const id = editingId.value
-    if (!id) return false
-
-    saved = updateReminder(id, {
-      title,
-      date,
-      time: startTime,
-      endTime,
-      note: editForm.note.trim(),
-    })
-  }
-
-  if (!saved) return false
-
-  emit('update:dateKey', date)
-  if (closeAfterSave) {
-    cancelEdit()
-  }
-
-  return true
-}
-
-function saveReminderAndCreateNext() {
-  if (!saveReminder(false)) return
-
-  editingKind.value = 'new-reminder'
-  editingId.value = null
-  editForm.title = ''
-  editForm.note = ''
-  focusReminderEditor()
-}
-
-function saveEdit() {
-  if (isReminderForm.value) {
-    saveReminder(true)
-    return
-  }
-
-  const kind = editingKind.value
-  const title = editForm.title.trim()
-  if (!kind || !title) return
-
-  const id = editingId.value
-  if (!id) return
-
-  const saved = updateTask(id, {
-    title,
-    note: editForm.note.trim(),
-    priority: editForm.priority,
-  })
-
-  if (saved) cancelEdit()
 }
 
 function requestDeleteReminder(reminder: ReminderItem) {

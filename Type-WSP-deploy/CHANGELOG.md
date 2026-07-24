@@ -4,6 +4,62 @@
 
 ---
 
+## 2026-07-25 — 維運結構修正與 nginx 部署
+
+### 後端可靠性
+
+- 圖片處理改用資料列層級的 `processing_token` 與租約進行原子 claim，避免重複任務同時處理同一篇貼文。
+- 每次圖片工作使用獨立 processed object key；失敗回滾只會刪除該次工作建立的檔案。
+- Redis Stream 的重試入列、ACK 與原訊息刪除改在同一個 Redis transaction 執行。
+- API 與 Worker 共用 rollback manager；補償操作使用獨立、具 timeout 且不受原 request cancellation 影響的 context。
+
+### 資料庫與部署
+
+- 新增版本化 user/system database migration、`schema_migrations` 紀錄及 PostgreSQL advisory lock。
+- PostgreSQL 初始化腳本改由環境變數建立 database，不再寫死 `user_db`、`system_db` 與 owner。
+- API 啟動時先執行 migration，成功後才進入服務狀態。
+- Go、Alpine、Node、PostgreSQL、Redis、MinIO 與 ModSecurity CRS 映像皆以 digest 鎖定。
+- nginx 改為 multi-stage build，直接從 Vue 原始碼產生前端，不再依賴 Git 追蹤的 `frontend/dist`。
+- 從 Git index 移除 2,478 個 `.go-build-cache` 檔案及 12 個舊 frontend dist 檔案。
+
+### 前端維運
+
+- 解開 `backendApi → router → useSession → backendApi` 循環依賴，401 導頁改由應用程式邊界注入。
+- 將排程功能拆為 repository、seed、service、日期 editor、側欄日曆及互動 controller。
+- `SidebarWidgets.vue` 從 535 行降至 234 行；`DateScheduleModal.vue` 從 599 行降至 360 行。
+- 新增共用 dialog focus trap composable。
+
+### 測試與 CI
+
+- 新增 ESLint、Vitest、Vue Test Utils 與 Playwright 設定。
+- 新增 API client、Pinia feed store、session、schedule repository、刪除對話框及登入 E2E 測試。
+- 新增 Pull Request CI：前端 lint/test/build、Go test/vet 與 Playwright。
+- GitHub Pages 部署前增加 lint 與單元測試。
+
+### 驗證結果
+
+- Go `shared`、`api`、`worker`：`go test ./...` 與 `go vet ./...` 通過。
+- 前端：TypeScript typecheck、ESLint、5 個 Vitest 測試檔／7 項測試通過。
+- Playwright 登入流程通過。
+- Docker Compose 設定驗證通過，API、Worker、nginx images 建置成功。
+
+### nginx 部署紀錄
+
+- 部署時間：2026-07-25（Asia/Taipei）。
+- 部署方式：沿用運行中 nginx 的 `SERVER_NAME` 與 API port，以 `--no-deps` 僅重建 `nginx-waf`，未重建 API、PostgreSQL、Redis 或 MinIO。
+- 部署 image：`type-wsp-deploy-nginx:latest`。
+- 上線前端資產：`assets/index-BM73O5II.js`。
+- 驗證結果：容器 `healthy`、`https://127.0.0.1/` 回傳 HTTP 200，且實際載入新版資產。
+- 第一次部署因缺少 `Type-WSP-deploy/.env` 被 Compose 中止，未修改容器；後續使用現行 nginx 設定完成安全部署。
+
+### 已知限制
+
+- 正式驗證碼郵件仍是 Worker stub，尚未串接 SMTP／郵件服務。
+- 專案尚未建立正式 `.env`；下次完整 Compose 部署前必須補齊正式環境設定與密碼。
+- GitHub branch protection 仍需將 `CI` 設為 required check，才能真正阻止未通過測試的 PR 合併。
+
+---
+
 ## 2026-07-15 — 登入狀態、個人排程與互動體驗更新
 
 ### 登入與 Session

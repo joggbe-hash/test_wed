@@ -13,18 +13,21 @@ import (
 	"log"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/google/uuid"
 	"github.com/minio/minio-go/v7"
 	"github.com/rwcarlsen/goexif/exif"
 	"golang.org/x/image/draw"
 	"typewsp/shared/contracts"
+	"typewsp/shared/rollback"
 )
 
 const maxDimension = 4096
 const jpegQuality = 95
 const maxRawImageBytes = 8 << 20
 const maxImagePixels = 20_000_000
+const imageProcessingLease = 10 * time.Minute
 
 type processedImage struct {
 	data        []byte
@@ -36,77 +39,86 @@ type processedImage struct {
 // 1. 從 MinIO raw/ 讀原圖。
 // 2. 修正 EXIF 方向，必要時縮圖並重新壓縮。
 // 3. 把處理後的圖片存到 processed/，更新 DB 為 ready，並通知前端。
-func processImagePost(ctx context.Context, payload ImagePostPayload) error {
+func processImagePost(ctx context.Context, payload ImagePostPayload) (resultErr error) {
 	if payload.PostID <= 0 || payload.UserID <= 0 || len(payload.RawKeys) == 0 {
 		return fmt.Errorf("invalid image task payload")
 	}
 
-	var currentStatus string
-	if err := systemPool.QueryRow(ctx, "SELECT image_status FROM posts WHERE id = $1", payload.PostID).Scan(&currentStatus); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil
-		}
-		return fmt.Errorf("load post image status failed: %w", err)
+	processingToken := uuid.NewString()
+	claimed, err := claimImagePost(ctx, payload.PostID, processingToken)
+	if err != nil {
+		return err
 	}
-	if currentStatus == "ready" {
+	if !claimed {
 		return nil
 	}
 
-	ops := NewAtomicRollback()
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		if releaseErr := releaseImageClaim(ctx, payload.PostID, processingToken); releaseErr != nil {
+			resultErr = errors.Join(resultErr, releaseErr)
+		}
+	}()
+
+	ops := rollback.New()
 	var processedKeys []string
 
 	for _, rawKey := range payload.RawKeys {
 		if !isRawImageKey(rawKey) {
-			ops.Execute()
-			return fmt.Errorf("invalid raw image key %q", rawKey)
+			return rollbackImageAttempt(ctx, ops, fmt.Errorf("invalid raw image key %q", rawKey))
 		}
 		rawObj, err := minioClient.GetObject(ctx, minioBucket, rawKey, minio.GetObjectOptions{})
 		if err != nil {
-			ops.Execute()
-			return fmt.Errorf("get raw object failed key=%s: %w", rawKey, err)
+			return rollbackImageAttempt(ctx, ops, fmt.Errorf("get raw object failed key=%s: %w", rawKey, err))
 		}
 
 		rawData, err := readRawImage(rawObj)
 		if err != nil {
-			ops.Execute()
-			return fmt.Errorf("read raw object failed: %w", err)
+			return rollbackImageAttempt(ctx, ops, fmt.Errorf("read raw object failed: %w", err))
 		}
 
 		processed, err := resizeAndCompress(rawData)
 		if err != nil {
-			ops.Execute()
-			return fmt.Errorf("process image failed: %w", err)
+			return rollbackImageAttempt(ctx, ops, fmt.Errorf("process image failed: %w", err))
 		}
 
-		processedKey := contracts.ProcessedImagePrefix + rawKey[len(contracts.RawImagePrefix):len(rawKey)-len(filepath.Ext(rawKey))] + processed.extension
+		processedKey := processedImageKey(rawKey, processingToken, processed.extension)
 		reader := bytes.NewReader(processed.data)
 		_, err = minioClient.PutObject(ctx, minioBucket, processedKey, reader, int64(len(processed.data)),
 			minio.PutObjectOptions{ContentType: processed.contentType})
 		if err != nil {
-			ops.Execute()
-			return fmt.Errorf("put processed object failed: %w", err)
+			return rollbackImageAttempt(ctx, ops, fmt.Errorf("put processed object failed: %w", err))
 		}
 
 		processedKeys = append(processedKeys, processedKey)
 		capturedKey := processedKey
-		ops.Add("remove processed object "+processedKey, func() error {
-			return minioClient.RemoveObject(ctx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
+		ops.Add("remove processed object "+processedKey, func(cleanupCtx context.Context) error {
+			return minioClient.RemoveObject(cleanupCtx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
 		})
 	}
 
 	processedJSON, _ := json.Marshal(processedKeys)
 	tag, err := systemPool.Exec(ctx,
-		`UPDATE posts SET image_url = $1, image_status = 'ready' WHERE id = $2 AND image_status = 'processing'`,
-		string(processedJSON), payload.PostID,
+		`UPDATE posts
+		 SET image_url = $1,
+		     image_status = 'ready',
+		     processing_token = NULL,
+		     processing_started_at = NULL
+		 WHERE id = $2
+		   AND image_status = 'processing'
+		   AND processing_token = $3`,
+		string(processedJSON), payload.PostID, processingToken,
 	)
 	if err != nil {
-		ops.Execute()
-		return fmt.Errorf("update post image state failed: %w", err)
+		return rollbackImageAttempt(ctx, ops, fmt.Errorf("update post image state failed: %w", err))
 	}
 	if tag.RowsAffected() == 0 {
-		ops.Execute()
-		return nil
+		return rollbackImageAttempt(ctx, ops, nil)
 	}
+	completed = true
 
 	for _, rawKey := range payload.RawKeys {
 		if err := minioClient.RemoveObject(ctx, minioBucket, rawKey, minio.RemoveObjectOptions{}); err != nil {
@@ -124,8 +136,69 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) error {
 	return nil
 }
 
+func claimImagePost(ctx context.Context, postID int, token string) (bool, error) {
+	expiredBefore := time.Now().UTC().Add(-imageProcessingLease)
+	tag, err := systemPool.Exec(ctx,
+		`UPDATE posts
+		 SET processing_token = $1,
+		     processing_started_at = NOW()
+		 WHERE id = $2
+		   AND image_status = 'processing'
+		   AND (
+		     processing_token IS NULL
+		     OR processing_started_at IS NULL
+		     OR processing_started_at < $3
+		   )`,
+		token, postID, expiredBefore,
+	)
+	if err != nil {
+		return false, fmt.Errorf("claim image post failed: %w", err)
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+func releaseImageClaim(ctx context.Context, postID int, token string) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+
+	_, err := systemPool.Exec(cleanupCtx,
+		`UPDATE posts
+		 SET processing_token = NULL,
+		     processing_started_at = NULL
+		 WHERE id = $1
+		   AND image_status = 'processing'
+		   AND processing_token = $2`,
+		postID, token,
+	)
+	if err != nil {
+		return fmt.Errorf("release image processing claim failed: %w", err)
+	}
+	return nil
+}
+
+func processedImageKey(rawKey, processingToken, extension string) string {
+	name := strings.TrimPrefix(rawKey, contracts.RawImagePrefix)
+	base := strings.TrimSuffix(name, filepath.Ext(name))
+	return contracts.ProcessedImagePrefix + base + "-" + processingToken + extension
+}
+
+func rollbackImageAttempt(ctx context.Context, operations *rollback.Manager, cause error) error {
+	if rollbackErr := operations.Execute(ctx); rollbackErr != nil {
+		return errors.Join(cause, fmt.Errorf("rollback image attempt failed: %w", rollbackErr))
+	}
+	return cause
+}
+
 func markPostFailed(ctx context.Context, postID int) error {
-	_, err := systemPool.Exec(ctx, `UPDATE posts SET image_status = 'failed' WHERE id = $1`, postID)
+	_, err := systemPool.Exec(ctx,
+		`UPDATE posts
+		 SET image_status = 'failed',
+		     processing_token = NULL,
+		     processing_started_at = NULL
+		 WHERE id = $1
+		   AND image_status = 'processing'`,
+		postID,
+	)
 	return err
 }
 

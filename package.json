@@ -1,10 +1,16 @@
 {
   "scripts": {
     "dev": "vite",
+    "typecheck": "vue-tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "test": "vitest run --config vitest.config.mjs",
+    "test:watch": "vitest --config vitest.config.mjs",
+    "test:coverage": "vitest run --coverage --config vitest.config.mjs",
+    "test:e2e": "playwright test",
     "build": "vue-tsc && vite build",
     "build:pages": "vue-tsc && vite build --mode pages",
-    "build:backend": "vue-tsc && vite build --mode backend --outDir=Type-WSP-deploy/frontend/dist --emptyOutDir",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify": "npm run lint && npm run test && npm run build"
   },
   "dependencies": {
     "@vitejs/plugin-vue": "^5.2.1",
@@ -14,9 +20,19 @@
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@tailwindcss/vite": "^4.3.0",
+    "@vitest/coverage-v8": "^4.1.10",
+    "@vue/test-utils": "^2.4.11",
+    "eslint": "^10.7.0",
+    "eslint-plugin-vue": "^10.10.0",
+    "globals": "^17.7.0",
+    "happy-dom": "^20.11.1",
     "tailwindcss": "^4.3.0",
     "typescript": "^6.0.3",
+    "typescript-eslint": "^8.65.0",
+    "vitest": "^4.1.10",
     "vue-tsc": "^3.3.1"
   }
 }

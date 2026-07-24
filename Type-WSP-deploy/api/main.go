@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -64,6 +65,13 @@ func main() {
 
 	InitDB(cfg)
 	defer CloseDB()
+
+	migrationCtx, cancelMigrations := context.WithTimeout(context.Background(), 60*time.Second)
+	if err := RunMigrations(migrationCtx); err != nil {
+		cancelMigrations()
+		log.Fatalf("database migration failed: %v", err)
+	}
+	cancelMigrations()
 
 	InitRedis(cfg)
 	InitMinio(cfg)

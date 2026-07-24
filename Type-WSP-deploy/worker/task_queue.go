@@ -168,14 +168,13 @@ func processTask(ctx context.Context, task Task) error {
 func retryOrDeadLetterTask(ctx context.Context, task Task, cause error) error {
 	nextAttempt := task.Attempts + 1
 	if nextAttempt < maxTaskAttempts {
-		if err := rdb.XAdd(ctx, &redis.XAddArgs{
-			Stream: contracts.TaskStreamKey,
-			Values: map[string]any{"type": task.Type, "payload": string(task.Payload), "attempts": nextAttempt},
-		}).Err(); err != nil {
+		if err := moveTaskToStream(ctx, contracts.TaskStreamKey, task.MessageID, map[string]any{
+			"type": task.Type, "payload": string(task.Payload), "attempts": nextAttempt,
+		}); err != nil {
 			return fmt.Errorf("enqueue retry failed: %w", err)
 		}
 		log.Printf("task %s failed; retry %d/%d: %v", task.MessageID, nextAttempt, maxTaskAttempts-1, cause)
-		return acknowledgeTask(ctx, task.MessageID)
+		return nil
 	}
 
 	if task.Type == contracts.TaskProcessImagePost {
@@ -186,34 +185,49 @@ func retryOrDeadLetterTask(ctx context.Context, task Task, cause error) error {
 			}
 		}
 	}
-	if err := addDeadLetter(ctx, task.Type, string(task.Payload), nextAttempt, cause); err != nil {
-		return err
-	}
-	return acknowledgeTask(ctx, task.MessageID)
+	return moveTaskToDeadLetter(ctx, task.MessageID, task.Type, string(task.Payload), nextAttempt, cause)
 }
 
 func deadLetterMessage(ctx context.Context, message redis.XMessage, cause error) error {
 	taskType, _ := messageValue(message, "type")
 	payload, _ := messageValue(message, "payload")
-	if err := addDeadLetter(ctx, taskType, payload, maxTaskAttempts, cause); err != nil {
-		return err
-	}
-	return acknowledgeTask(ctx, message.ID)
+	return moveTaskToDeadLetter(ctx, message.ID, taskType, payload, maxTaskAttempts, cause)
 }
 
-func addDeadLetter(ctx context.Context, taskType, payload string, attempts int, cause error) error {
-	return rdb.XAdd(ctx, &redis.XAddArgs{
-		Stream: taskDeadLetterKey,
-		Values: map[string]any{
-			"type": taskType, "payload": payload, "attempts": attempts,
-			"error": cause.Error(), "failed_at": time.Now().UTC().Format(time.RFC3339Nano),
-		},
-	}).Err()
+func moveTaskToDeadLetter(
+	ctx context.Context,
+	messageID string,
+	taskType string,
+	payload string,
+	attempts int,
+	cause error,
+) error {
+	return moveTaskToStream(ctx, taskDeadLetterKey, messageID, map[string]any{
+		"type": taskType, "payload": payload, "attempts": attempts,
+		"error": cause.Error(), "failed_at": time.Now().UTC().Format(time.RFC3339Nano),
+	})
+}
+
+func moveTaskToStream(
+	ctx context.Context,
+	destination string,
+	messageID string,
+	values map[string]any,
+) error {
+	_, err := rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.XAdd(ctx, &redis.XAddArgs{Stream: destination, Values: values})
+		pipe.XAck(ctx, contracts.TaskStreamKey, taskConsumerGroup, messageID)
+		pipe.XDel(ctx, contracts.TaskStreamKey, messageID)
+		return nil
+	})
+	return err
 }
 
 func acknowledgeTask(ctx context.Context, messageID string) error {
-	if err := rdb.XAck(ctx, contracts.TaskStreamKey, taskConsumerGroup, messageID).Err(); err != nil {
-		return err
-	}
-	return rdb.XDel(ctx, contracts.TaskStreamKey, messageID).Err()
+	_, err := rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
+		pipe.XAck(ctx, contracts.TaskStreamKey, taskConsumerGroup, messageID)
+		pipe.XDel(ctx, contracts.TaskStreamKey, messageID)
+		return nil
+	})
+	return err
 }

@@ -4,7 +4,9 @@ skills-lock.json
 node_modules/
 dist/
 .go-build-cache/
+coverage/
+playwright-report/
+test-results/
+Type-WSP-deploy/frontend/dist/
 .env.local
 .env.*.local
-!Type-WSP-deploy/frontend/dist/
-!Type-WSP-deploy/frontend/dist/**

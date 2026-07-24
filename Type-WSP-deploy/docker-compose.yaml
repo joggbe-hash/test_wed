@@ -2,7 +2,14 @@ services:
 
   # DMZ layer：唯一對外服務。Nginx/WAF 負責 HTTPS、SPA 靜態檔、API reverse proxy。
   nginx:
-    image: owasp/modsecurity-crs:nginx
+    build:
+      context: ..
+      dockerfile: Type-WSP-deploy/nginx/Dockerfile
+      args:
+        VITE_SITE_URL: ${VITE_SITE_URL:-}
+        VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
+        VITE_USE_MOCK_API: ${VITE_USE_MOCK_API:-false}
     container_name: nginx-waf
     ports:
       - "80:8080"
@@ -28,12 +35,12 @@ services:
       - ./nginx/certs:/etc/nginx/certs:ro
       - ./nginx/modsec/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
       - ./nginx/modsec/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf:ro
-      - ./frontend/dist:/usr/share/nginx/html:ro
     networks:
       - web_net
       - app_net
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
 
   # Application layer：Go API，處理登入、貼文、上傳、WebSocket。
@@ -46,6 +53,7 @@ services:
       - "${API_PORT:?set API_PORT in .env}"
     environment:
       APP_ENV: ${APP_ENV:-production}
+      API_PORT: ${API_PORT:?set API_PORT in .env}
       API_LISTEN_ADDR: ":${API_PORT:?set API_PORT in .env}"
       EXPOSE_VERIFICATION_CODE: ${EXPOSE_VERIFICATION_CODE:-false}
       SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-86400}
@@ -73,11 +81,17 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:$${API_PORT}/api/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
     restart: unless-stopped
 
   # Redis 同時做 session store、驗證碼暫存、非同步工作佇列和 Pub/Sub 通知。
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
     container_name: redis-queue
     command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
     volumes:
@@ -121,18 +135,22 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      api:
+        condition: service_healthy
     deploy:
       replicas: 2
     restart: unless-stopped
 
   # Data layer：PostgreSQL 只在內部網路，外部不能直接連。
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
     container_name: postgres-db
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB_SYSTEM:?set POSTGRES_DB_SYSTEM in .env}
+      POSTGRES_DB_SYSTEM: ${POSTGRES_DB_SYSTEM:?set POSTGRES_DB_SYSTEM in .env}
+      POSTGRES_DB_USER: ${POSTGRES_DB_USER:?set POSTGRES_DB_USER in .env}
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
@@ -147,7 +165,7 @@ services:
 
   # MinIO 是 S3 相容物件儲存，保存 raw/ 原圖與 processed/ 處理後圖片。
   minio:
-    image: minio/minio:latest
+    image: minio/minio:latest@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     container_name: minio-storage
     command: server /data --console-address ":9001"
     environment:

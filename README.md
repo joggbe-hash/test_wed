@@ -1,103 +1,99 @@
-# Joggbe 專案啟動說明
+# Joggbe 開發與部署
 
-這份文件給團隊成員在另一台電腦第一次抓專案、啟動網站、修改後上傳使用。
+## 本機前端
 
-## 1. 第一次抓專案
-
-```powershell
-git clone https://github.com/joggbe-hash/test_wed.git
-cd test_wed
-git switch V1-Version
-npm install
-```
-
-## 2. 只開前端開發版
+需求：Node.js 24、npm。
 
 ```powershell
+npm ci
 npm run dev
 ```
 
-開發模式會讀取 `.env.development`，預設啟用靜態 demo 資料。若要測試正式 API，可複製 `.env.example` 為 `.env.local`，設定 `VITE_API_BASE_URL` 並將 `VITE_USE_MOCK_API` 改為 `false`。
+預設網址為 `http://localhost:5173/`。若要連接後端，可從 `.env.example` 建立
+`.env.local`，並設定 `VITE_API_BASE_URL` 與 `VITE_USE_MOCK_API=false`。
 
-Vite 會顯示本機網址，通常是：
+## 品質檢查
 
-```text
-http://localhost:5173/
+```powershell
+npm run verify
+npm run test:e2e
 ```
 
-## 3. 開 Docker 全端版
+`verify` 會依序執行 ESLint、Vitest 與正式建置。端對端測試第一次執行前需安裝
+Chromium：
 
-這會在目前這台電腦用 Docker 開一整套本機服務：
+```powershell
+npx playwright install chromium
+```
 
-- `nginx`：對外網站入口
-- `api`：Go 後端
-- `worker`：圖片處理與背景工作
-- `postgres`：本機資料庫
-- `redis`：session、驗證碼、工作佇列
-- `minio`：本機圖片儲存
+Go 服務各自是獨立 module：
 
-資料會存在這台電腦自己的 Docker volume，不會自動連到其他人的資料庫。
+```powershell
+cd Type-WSP-deploy/api
+go test ./...
+go vet ./...
 
-第一次啟動前先建立本機環境變數檔：
+cd ../worker
+go test ./...
+go vet ./...
+
+cd ../shared
+go test ./...
+go vet ./...
+```
+
+Pull Request 與主要分支 push 會由 `.github/workflows/ci.yml` 執行上述檢查。
+
+## Docker 部署
+
+需求：Docker Engine 與 Docker Compose。
 
 ```powershell
 cd Type-WSP-deploy
-copy .env.example .env
-cd ..
-```
-
-請至少更換 `.env` 裡的 PostgreSQL、Redis、MinIO 與 `SECRET_KEY`。`POSTGRES_SSLMODE=disable`、`MINIO_SECURE=false` 只適用於這份 Docker Compose 的內部網路；若改接外部服務，請啟用並驗證 TLS。
-
-部署到正式網域前，另以 `.env.local` 或 CI 環境變數設定：
-
-```text
-VITE_SITE_URL=https://your-domain.example/
-VITE_BASE_PATH=/
-VITE_USE_MOCK_API=false
-```
-
-先把前端 build 到 Docker nginx 使用的資料夾：
-
-```powershell
-npm run build:backend
-```
-
-再啟動後端、資料庫、Redis、MinIO、nginx：
-
-```powershell
-cd Type-WSP-deploy
+Copy-Item .env.example .env
 docker compose up --build
 ```
 
-啟動後瀏覽：
+啟動前必須替換 `.env` 內的 PostgreSQL、Redis、MinIO 密碼與 `SECRET_KEY`。
+前端由 nginx 的 multi-stage image 直接從原始碼建置，不需也不應提交
+`Type-WSP-deploy/frontend/dist`。
 
-```text
-https://127.0.0.1/social
-```
+服務包含：
 
-如果瀏覽器跳出憑證警告，這是本機自簽憑證造成的，開發環境可以先允許繼續。
+- `nginx`：WAF、TLS、前端靜態檔與 API reverse proxy
+- `api`：Go HTTP API
+- `worker`：Redis Stream 非同步工作
+- `postgres`：user/system database
+- `redis`：session、cache、task stream 與 Pub/Sub
+- `minio`：原圖與處理後圖片
 
-## 4. 每次開始改之前
+健康檢查端點為 `/api/health`。
 
-先確認在展示分支，並拉 GitHub 最新版：
+## 資料庫 migration
 
-```powershell
-git switch V1-Version
-git pull origin V1-Version
-```
+API 啟動時會在 advisory lock 保護下執行：
 
-## 5. 改完後上傳
+- `Type-WSP-deploy/api/migrations/user/*.sql`
+- `Type-WSP-deploy/api/migrations/system/*.sql`
 
-```powershell
-git status
-git add .
-git commit -m "寫清楚這次改了什麼"
-git push origin V1-Version
-```
+每個檔案以不可重複的數字版本開頭，例如 `002_add_profile.sql`。已執行版本記錄
+在各 database 的 `schema_migrations`，因此既有永久 volume 也會套用新版本。
+不要修改已部署過的 migration；新增下一個版本。
 
-## 6. 注意事項
+`postgres/init` 只負責全新 volume 建立第二個 database，名稱來自
+`POSTGRES_DB_SYSTEM` 與 `POSTGRES_DB_USER`。
 
-- 不要提交 `node_modules/`。
-- 不要提交 `.env` 或密碼。
-- 如果只改前端原始碼，通常需要重新跑 `npm run build:backend`，Docker 版才會更新。
-- 如果多人同時改同一個檔案，`git pull` 時可能會出現衝突，需要先解完衝突再 commit。
+## 驗證碼郵件
+
+目前 worker 的寄信工作仍是開發用 stub，正式環境不會寄信。依目前決定暫不串接
+SMTP／郵件服務，因此正式註冊流程在此功能完成前不可視為可用。
+
+## 版本控制
+
+以下內容不應提交：
+
+- `.env*` 中的私密設定
+- `node_modules/`
+- `.go-build-cache/`
+- `coverage/`、`playwright-report/`、`test-results/`
+- `dist/` 與 `Type-WSP-deploy/frontend/dist/`

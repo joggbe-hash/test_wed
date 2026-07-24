@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/minio/minio-go/v7"
 	"typewsp/shared/contracts"
+	"typewsp/shared/rollback"
 )
 
 // Post 是 feed API 回給前端的貼文格式；image_urls 會是可直接載入的 API URL。
@@ -455,7 +456,7 @@ func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, cont
 }
 
 func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, content string, files []*fileEntry) {
-	ops := NewAtomicRollback()
+	ops := rollback.New()
 
 	var rawKeys []string
 	for _, f := range files {
@@ -463,14 +464,16 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 		_, err := minioClient.PutObject(ctx, minioBucket, rawKey, f.reader, f.size,
 			minio.PutObjectOptions{ContentType: f.contentType})
 		if err != nil {
-			ops.Execute()
+			if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
+				log.Printf("rollback image upload failed: %v", rollbackErr)
+			}
 			writeJSON(w, http.StatusInternalServerError, M{"error": "upload image failed"})
 			return
 		}
 		rawKeys = append(rawKeys, rawKey)
 		capturedKey := rawKey
-		ops.Add("remove raw object "+rawKey, func() error {
-			return minioClient.RemoveObject(ctx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
+		ops.Add("remove raw object "+rawKey, func(cleanupCtx context.Context) error {
+			return minioClient.RemoveObject(cleanupCtx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
 		})
 	}
 
@@ -484,12 +487,14 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 		).Scan(&postID)
 	})
 	if err != nil {
-		ops.Execute()
+		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
+			log.Printf("rollback image post creation failed: %v", rollbackErr)
+		}
 		writeJSON(w, http.StatusInternalServerError, M{"error": "create post failed"})
 		return
 	}
-	ops.Add("delete post row", func() error {
-		_, e := systemPool.Exec(ctx, "DELETE FROM posts WHERE id = $1", postID)
+	ops.Add("delete post row", func(cleanupCtx context.Context) error {
+		_, e := systemPool.Exec(cleanupCtx, "DELETE FROM posts WHERE id = $1", postID)
 		return e
 	})
 
@@ -498,7 +503,9 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 		"user_id":  user.ID,
 		"raw_keys": rawKeys,
 	}); err != nil {
-		ops.Execute()
+		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
+			log.Printf("rollback queued image post failed: %v", rollbackErr)
+		}
 		writeJSON(w, http.StatusInternalServerError, M{"error": "enqueue image job failed"})
 		return
 	}

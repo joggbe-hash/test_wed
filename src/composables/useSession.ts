@@ -45,8 +45,7 @@ async function restoreCurrentSession(options: RestoreCurrentSessionOptions = {})
   if (pendingSessionCheck) return pendingSessionCheck
 
   const requestRevision = sessionRevision
-  let request: Promise<User | null>
-  request = checkCurrentSession()
+  const request: Promise<User | null> = checkCurrentSession()
     .then(({ user }) => {
       if (requestRevision !== sessionRevision) return currentUser.value
 

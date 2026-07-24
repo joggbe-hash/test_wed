@@ -1,4 +1,4 @@
-import router from '../router'
+import { notifyUnauthorized } from './unauthorizedHandler'
 
 export interface User {
   id: number
@@ -63,11 +63,7 @@ async function apiFetch<T>(
 
   if (!response.ok) {
     if (response.status === 401 && options.redirectOnUnauthorized !== false) {
-      const currentRoute = router.currentRoute.value
-      void router.push({
-        path: '/login',
-        query: currentRoute.path === '/login' ? {} : { redirect: currentRoute.fullPath },
-      })
+      void notifyUnauthorized()
     }
 
     throw new ApiError(

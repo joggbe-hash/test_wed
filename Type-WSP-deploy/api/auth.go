@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"crypto/rand"
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"net/mail"
@@ -14,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/crypto/bcrypt"
 	"typewsp/shared/contracts"
+	"typewsp/shared/rollback"
 )
 
 const (
@@ -126,22 +129,24 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	ops := NewAtomicRollback()
+	ops := rollback.New()
 
 	codeKey := codePrefix + email
 	if err := rdb.Set(ctx, codeKey, code, codeTTL).Err(); err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "save verification code failed"})
 		return
 	}
-	ops.Add("delete verification code "+codeKey, func() error {
-		return rdb.Del(ctx, codeKey).Err()
+	ops.Add("delete verification code "+codeKey, func(cleanupCtx context.Context) error {
+		return rdb.Del(cleanupCtx, codeKey).Err()
 	})
 
 	if err := enqueueTask(ctx, contracts.TaskSendVerificationEmail, M{
 		"email": email,
 		"code":  code,
 	}); err != nil {
-		ops.Execute()
+		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
+			log.Printf("rollback send-code request failed: %v", rollbackErr)
+		}
 		writeJSON(w, http.StatusInternalServerError, M{"error": "enqueue email job failed"})
 		return
 	}

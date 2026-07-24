@@ -59,3 +59,15 @@ func TestResizeAndCompressAlwaysReencodesImage(t *testing.T) {
 		t.Fatalf("processed image is not decodable: %v", err)
 	}
 }
+
+func TestProcessedImageKeyIsUniquePerAttempt(t *testing.T) {
+	first := processedImageKey("raw/example.jpg", "attempt-one", ".jpg")
+	second := processedImageKey("raw/example.jpg", "attempt-two", ".jpg")
+
+	if first == second {
+		t.Fatalf("processed keys must differ across attempts: %q", first)
+	}
+	if first != "processed/example-attempt-one.jpg" {
+		t.Fatalf("unexpected processed key: %q", first)
+	}
+}
