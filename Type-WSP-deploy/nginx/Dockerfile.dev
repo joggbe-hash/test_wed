@@ -21,18 +21,9 @@ ENV VITE_USE_MOCK_API=$VITE_USE_MOCK_API
 RUN npm run typecheck \
     && npm exec vite build -- --mode backend --outDir=/frontend-dist --emptyOutDir
 
+# Local-only image: it deliberately contains no TLS certificate and no TLS
+# validation hook. Use it only through docker-compose.dev.yaml.
 FROM owasp/modsecurity-crs:nginx@sha256:2051ff18b836c1d9bbc5c7754451c1687ea27352e497b89d0c9fc7e657861e07
-
-USER root
-
-RUN if command -v apk >/dev/null 2>&1; then \
-        apk add --no-cache openssl; \
-    else \
-        apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*; \
-    fi
-
-COPY Type-WSP-deploy/nginx/scripts/10-validate-tls.sh /docker-entrypoint.d/10-validate-tls.sh
-RUN chmod 755 /docker-entrypoint.d/10-validate-tls.sh
 
 COPY --from=frontend-builder /frontend-dist /usr/share/nginx/html
 

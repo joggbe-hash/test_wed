@@ -28,6 +28,8 @@ export function useAccessibleDialog(options: AccessibleDialogOptions) {
   let background: HTMLElement | null = null
   let backgroundWasInert = false
   let backgroundAriaHidden: string | null = null
+  let ownsBackgroundInert = false
+  let ownsBackgroundAriaHidden = false
 
   function focusInitialControl() {
     void nextTick(() => {
@@ -81,8 +83,11 @@ export function useAccessibleDialog(options: AccessibleDialogOptions) {
       if (background) {
         backgroundWasInert = background.inert
         backgroundAriaHidden = background.getAttribute('aria-hidden')
-        background.inert = true
-        background.setAttribute('aria-hidden', 'true')
+        ownsBackgroundInert = !backgroundWasInert
+        ownsBackgroundAriaHidden = backgroundAriaHidden !== 'true'
+
+        if (ownsBackgroundInert) background.inert = true
+        if (ownsBackgroundAriaHidden) background.setAttribute('aria-hidden', 'true')
       }
     }
 
@@ -94,9 +99,11 @@ export function useAccessibleDialog(options: AccessibleDialogOptions) {
     window.removeEventListener('keydown', handleKeydown)
     document.body.style.overflow = previousBodyOverflow
     if (background) {
-      background.inert = backgroundWasInert
-      if (backgroundAriaHidden === null) background.removeAttribute('aria-hidden')
-      else background.setAttribute('aria-hidden', backgroundAriaHidden)
+      if (ownsBackgroundInert) background.inert = backgroundWasInert
+      if (ownsBackgroundAriaHidden) {
+        if (backgroundAriaHidden === null) background.removeAttribute('aria-hidden')
+        else background.setAttribute('aria-hidden', backgroundAriaHidden)
+      }
     }
     if (returnFocus?.isConnected) {
       returnFocus.focus({ preventScroll: true })

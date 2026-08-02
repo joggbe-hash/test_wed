@@ -46,3 +46,21 @@ func TestImageFileInfoRejectsNonImage(t *testing.T) {
 		t.Fatal("expected non-image upload to be rejected")
 	}
 }
+
+func TestParsePostVisibilityDefaultsSafelyAndRejectsUnknownValues(t *testing.T) {
+	for _, tt := range []struct {
+		raw  string
+		want postVisibility
+		ok   bool
+	}{
+		{raw: "", want: postVisibilityPublic, ok: true},
+		{raw: " public ", want: postVisibilityPublic, ok: true},
+		{raw: "private", want: postVisibilityPrivate, ok: true},
+		{raw: "friends", ok: false},
+	} {
+		got, ok := parsePostVisibility(tt.raw)
+		if got != tt.want || ok != tt.ok {
+			t.Fatalf("parsePostVisibility(%q) = %q, %v; want %q, %v", tt.raw, got, ok, tt.want, tt.ok)
+		}
+	}
+}

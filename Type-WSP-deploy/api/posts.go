@@ -27,6 +27,7 @@ type Post struct {
 	ID          int       `json:"id"`
 	UserID      int       `json:"user_id"`
 	Username    string    `json:"username"`
+	Visibility  string    `json:"visibility"`
 	Content     string    `json:"content,omitempty"`
 	ImageURLs   []string  `json:"image_urls,omitempty"`
 	ImageStatus string    `json:"image_status"`
@@ -34,14 +35,30 @@ type Post struct {
 }
 
 const (
-	feedCacheKey        = contracts.FeedCacheKey
-	feedCacheTTL        = 30 * time.Second
 	maxPostBodyBytes    = 25 << 20
 	maxPostContentRunes = 5000
 	maxMultipartMemory  = 8 << 20
 	maxImageUploadSize  = 8 << 20
 	maxImagesPerPost    = 4
 )
+
+type postVisibility string
+
+const (
+	postVisibilityPublic  postVisibility = "public"
+	postVisibilityPrivate postVisibility = "private"
+)
+
+func parsePostVisibility(raw string) (postVisibility, bool) {
+	switch postVisibility(strings.TrimSpace(raw)) {
+	case "", postVisibilityPublic:
+		return postVisibilityPublic, true
+	case postVisibilityPrivate:
+		return postVisibilityPrivate, true
+	default:
+		return "", false
+	}
+}
 
 type feedCursor struct {
 	CreatedAt time.Time
@@ -79,18 +96,12 @@ func validPostContent(content string) bool {
 	return utf8.ValidString(content) && utf8.RuneCountInString(content) <= maxPostContentRunes
 }
 
-// handleFeed 讀取最新 20 筆貼文。第一頁使用 Redis 快取，cursor 分頁直接查 DB。
+// handleFeed reads public posts plus private posts owned by the authenticated user.
+// The response is intentionally not shared through a global cache because visibility is user-specific.
 func handleFeed(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	user := currentUser(r)
 	cursor := r.URL.Query().Get("cursor")
-
-	if cursor == "" {
-		if cached, err := rdb.Get(ctx, feedCacheKey).Bytes(); err == nil {
-			w.Header().Set("Content-Type", "application/json")
-			w.Write(cached)
-			return
-		}
-	}
 
 	var rows pgx.Rows
 	var err error
@@ -101,14 +112,17 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rows, err = systemPool.Query(ctx,
-			`SELECT id, user_id, username, content, image_url, image_status, created_at
+			`SELECT id, user_id, username, visibility, content, image_url, image_status, created_at
 			 FROM posts
-			 WHERE created_at < $1 OR (created_at = $1 AND id < $2)
-			 ORDER BY created_at DESC, id DESC LIMIT 20`, parsedCursor.CreatedAt, parsedCursor.ID)
+			 WHERE (visibility = 'public' OR user_id = $1)
+			   AND (created_at < $2 OR (created_at = $2 AND id < $3))
+			 ORDER BY created_at DESC, id DESC LIMIT 20`, user.ID, parsedCursor.CreatedAt, parsedCursor.ID)
 	} else {
 		rows, err = systemPool.Query(ctx,
-			`SELECT id, user_id, username, content, image_url, image_status, created_at
-			 FROM posts ORDER BY created_at DESC, id DESC LIMIT 20`)
+			`SELECT id, user_id, username, visibility, content, image_url, image_status, created_at
+			 FROM posts
+			 WHERE visibility = 'public' OR user_id = $1
+			 ORDER BY created_at DESC, id DESC LIMIT 20`, user.ID)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "load feed failed"})
@@ -120,7 +134,7 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var p Post
 		var imgURLRaw, imgStatus *string
-		if err := rows.Scan(&p.ID, &p.UserID, &p.Username, &p.Content,
+		if err := rows.Scan(&p.ID, &p.UserID, &p.Username, &p.Visibility, &p.Content,
 			&imgURLRaw, &imgStatus, &p.CreatedAt); err != nil {
 			log.Printf("scan post failed: %v", err)
 			continue
@@ -151,12 +165,6 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 
 	result := M{"posts": posts, "next_cursor": nextCursor}
 
-	if cursor == "" {
-		if data, err := json.Marshal(result); err == nil {
-			rdb.Set(ctx, feedCacheKey, data, feedCacheTTL)
-		}
-	}
-
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -169,7 +177,8 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 
 	if !isMultipartRequest(r) {
 		var body struct {
-			Content string `json:"content"`
+			Content    string `json:"content"`
+			Visibility string `json:"visibility"`
 		}
 		if err := readJSON(r, &body); err != nil {
 			if isMaxBytesError(err) {
@@ -188,7 +197,12 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 			writeJSON(w, http.StatusBadRequest, M{"error": "post content must be at most 5000 characters"})
 			return
 		}
-		createTextPost(ctx, w, user, body.Content)
+		visibility, valid := parsePostVisibility(body.Visibility)
+		if !valid {
+			writeJSON(w, http.StatusBadRequest, M{"error": "invalid post visibility"})
+			return
+		}
+		createTextPost(ctx, w, user, body.Content, visibility)
 		return
 	}
 
@@ -207,17 +221,22 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "post content must be at most 5000 characters"})
 		return
 	}
+	visibility, valid := parsePostVisibility(r.FormValue("visibility"))
+	if !valid {
+		writeJSON(w, http.StatusBadRequest, M{"error": "invalid post visibility"})
+		return
+	}
 
 	if len(files) == 0 {
 		if content == "" {
 			writeJSON(w, http.StatusBadRequest, M{"error": "content is required"})
 			return
 		}
-		createTextPost(ctx, w, user, content)
+		createTextPost(ctx, w, user, content, visibility)
 		return
 	}
 
-	createImagePost(ctx, w, user, content, files)
+	createImagePost(ctx, w, user, content, visibility, files)
 }
 
 func handleDeletePost(w http.ResponseWriter, r *http.Request) {
@@ -257,7 +276,6 @@ func handleDeletePost(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rdb.Del(ctx, feedCacheKey)
 	writeJSON(w, http.StatusOK, M{"message": "post deleted"})
 }
 
@@ -437,13 +455,13 @@ func isProcessedImageKey(key string) bool {
 	}
 }
 
-func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, content string) {
+func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, content string, visibility postVisibility) {
 	var postID int
 	err := WithTx(ctx, systemPool, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
-			`INSERT INTO posts (user_id, username, content, image_status)
-			 VALUES ($1, $2, $3, 'none') RETURNING id`,
-			user.ID, user.Username, content,
+			`INSERT INTO posts (user_id, username, visibility, content, image_status)
+			 VALUES ($1, $2, $3, $4, 'none') RETURNING id`,
+			user.ID, user.Username, visibility, content,
 		).Scan(&postID)
 	})
 	if err != nil {
@@ -451,11 +469,10 @@ func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, cont
 		return
 	}
 
-	rdb.Del(ctx, feedCacheKey)
 	writeJSON(w, http.StatusCreated, M{"message": "post created", "post_id": postID})
 }
 
-func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, content string, files []*fileEntry) {
+func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, content string, visibility postVisibility, files []*fileEntry) {
 	ops := rollback.New()
 
 	var rawKeys []string
@@ -481,9 +498,9 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 	var postID int
 	err := WithTx(ctx, systemPool, func(tx pgx.Tx) error {
 		return tx.QueryRow(ctx,
-			`INSERT INTO posts (user_id, username, content, image_url, image_status)
-			 VALUES ($1, $2, $3, $4, 'processing') RETURNING id`,
-			user.ID, user.Username, content, string(rawKeysJSON),
+			`INSERT INTO posts (user_id, username, visibility, content, image_url, image_status)
+			 VALUES ($1, $2, $3, $4, $5, 'processing') RETURNING id`,
+			user.ID, user.Username, visibility, content, string(rawKeysJSON),
 		).Scan(&postID)
 	})
 	if err != nil {
@@ -510,12 +527,12 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 		return
 	}
 
-	rdb.Del(ctx, feedCacheKey)
 	writeJSON(w, http.StatusCreated, M{"message": "post created, image processing", "post_id": postID})
 }
 
 // handleGetImage 從 MinIO 讀圖並由 API 回傳，前端不用知道物件儲存內部位址。
 func handleGetImage(w http.ResponseWriter, r *http.Request) {
+	user := currentUser(r)
 	key := r.PathValue("key")
 	if !isProcessedImageKey(key) {
 		http.NotFound(w, r)
@@ -523,6 +540,24 @@ func handleGetImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	var authorized bool
+	err := systemPool.QueryRow(ctx,
+		`SELECT EXISTS (
+			SELECT 1 FROM posts
+			WHERE image_url::jsonb @> jsonb_build_array($1::text)
+			  AND (visibility = 'public' OR user_id = $2)
+		)`,
+		key, user.ID,
+	).Scan(&authorized)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "authorize image access failed"})
+		return
+	}
+	if !authorized {
+		http.NotFound(w, r)
+		return
+	}
+
 	obj, err := minioClient.GetObject(ctx, minioBucket, key, minio.GetObjectOptions{})
 	if err != nil {
 		http.NotFound(w, r)

@@ -73,7 +73,7 @@ async function submitPost() {
 
   try {
     const imagesToUpload = selectedImages.value.slice(0, 4)
-    const result = await createPost(trimmedContent, imagesToUpload)
+    const result = await createPost(trimmedContent, imagesToUpload, visibility.value)
 
     if (imagesToUpload.length > 0) {
       let isProcessed = false

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fetchFeed } from './backendApi'
+import { createPost, fetchFeed } from './backendApi'
 import { setUnauthorizedHandler } from './unauthorizedHandler'
 
 describe('backendApi', () => {
@@ -27,5 +27,33 @@ describe('backendApi', () => {
 
     await expect(fetchFeed()).rejects.toMatchObject({ status: 401 })
     expect(unauthorized).toHaveBeenCalledOnce()
+  })
+
+  it('sends the selected visibility in JSON post requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ message: 'post created', post_id: 1 }),
+      { status: 201, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createPost('private note', [], 'private')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ content: 'private note', visibility: 'private' })
+  })
+
+  it('sends the selected visibility in multipart post requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ message: 'post created', post_id: 1 }),
+      { status: 201, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createPost('private image', [new File(['image'], 'image.png', { type: 'image/png' })], 'private')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = init.body as FormData
+    expect(body.get('content')).toBe('private image')
+    expect(body.get('visibility')).toBe('private')
   })
 })

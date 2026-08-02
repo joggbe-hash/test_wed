@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"log"
 	"math/big"
@@ -14,23 +15,55 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
 	"typewsp/shared/contracts"
 	"typewsp/shared/rollback"
 )
 
 const (
-	codePrefix          = "vcode:"
-	codeTTL             = 5 * time.Minute
-	rememberSessionTTL  = 30 * 24 * time.Hour
-	maxAuthRequestBytes = 64 << 10
-	minUsernameRunes    = 2
-	maxUsernameRunes    = 20
-	minPasswordBytes    = 8
-	maxPasswordBytes    = 72
+	codePrefix                     = "vcode:"
+	verificationAttemptsPrefix     = "vcode:attempts:"
+	verificationSendCooldownPrefix = "vcode:send-cooldown:"
+	codeTTL                        = 5 * time.Minute
+	verificationCodeAttemptLimit   = 5
+	verificationCodeSendCooldown   = time.Minute
+	rememberSessionTTL             = 30 * 24 * time.Hour
+	maxAuthRequestBytes            = 64 << 10
+	minUsernameRunes               = 2
+	maxUsernameRunes               = 20
+	minPasswordBytes               = 8
+	maxPasswordBytes               = 72
 )
 
 var debugVerificationCode bool
+
+var (
+	storeVerificationCodeScript = redis.NewScript(`
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
+redis.call('DEL', KEYS[2])
+return 1
+`)
+	recordFailedVerificationAttemptScript = redis.NewScript(`
+local storedCode = redis.call('GET', KEYS[1])
+if not storedCode or storedCode ~= ARGV[1] then
+  return -1
+end
+local ttl = redis.call('PTTL', KEYS[1])
+if ttl <= 0 then
+  return -1
+end
+local attempts = redis.call('INCR', KEYS[2])
+if attempts == 1 then
+  redis.call('PEXPIRE', KEYS[2], ttl)
+end
+if attempts >= tonumber(ARGV[2]) then
+  redis.call('DEL', KEYS[1])
+  redis.call('DEL', KEYS[2])
+end
+return attempts
+`)
+)
 
 func InitAuth(cfg *Config) {
 	debugVerificationCode = cfg.DebugVerificationCode
@@ -50,6 +83,28 @@ func verificationCodeResponse(code string) M {
 		response["debug_code"] = code
 	}
 	return response
+}
+
+func verificationAttemptKey(email string) string {
+	return verificationAttemptsPrefix + email
+}
+
+func verificationSendCooldownKey(email string) string {
+	return verificationSendCooldownPrefix + email
+}
+
+func recordFailedVerificationAttempt(ctx context.Context, codeKey, attemptKey, expectedCode string) (int, error) {
+	attempts, err := recordFailedVerificationAttemptScript.Run(
+		ctx,
+		rdb,
+		[]string{codeKey, attemptKey},
+		expectedCode,
+		verificationCodeAttemptLimit,
+	).Int()
+	if err != nil {
+		return 0, fmt.Errorf("record verification attempt failed: %w", err)
+	}
+	return attempts, nil
 }
 
 type sendCodeRequest struct {
@@ -123,21 +178,35 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	ctx := r.Context()
+	cooldownKey := verificationSendCooldownKey(email)
+	allowed, err := rdb.SetNX(ctx, cooldownKey, "1", verificationCodeSendCooldown).Result()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "start verification request failed"})
+		return
+	}
+	if !allowed {
+		writeJSON(w, http.StatusTooManyRequests, M{"error": "please wait before requesting another verification code"})
+		return
+	}
+
 	code, err := generateVerificationCode()
 	if err != nil {
+		rdb.Del(ctx, cooldownKey)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "generate verification code failed"})
 		return
 	}
-	ctx := r.Context()
 	ops := rollback.New()
 
 	codeKey := codePrefix + email
-	if err := rdb.Set(ctx, codeKey, code, codeTTL).Err(); err != nil {
+	attemptKey := verificationAttemptKey(email)
+	if err := storeVerificationCodeScript.Run(ctx, rdb, []string{codeKey, attemptKey}, code, codeTTL.Milliseconds()).Err(); err != nil {
+		rdb.Del(ctx, cooldownKey)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "save verification code failed"})
 		return
 	}
-	ops.Add("delete verification code "+codeKey, func(cleanupCtx context.Context) error {
-		return rdb.Del(cleanupCtx, codeKey).Err()
+	ops.Add("delete verification state", func(cleanupCtx context.Context) error {
+		return rdb.Del(cleanupCtx, codeKey, attemptKey, cooldownKey).Err()
 	})
 
 	if err := enqueueTask(ctx, contracts.TaskSendVerificationEmail, M{
@@ -146,6 +215,10 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 	}); err != nil {
 		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
 			log.Printf("rollback send-code request failed: %v", rollbackErr)
+		}
+		if errors.Is(err, errTaskQueueFull) {
+			writeJSON(w, http.StatusServiceUnavailable, M{"error": "verification service is busy"})
+			return
 		}
 		writeJSON(w, http.StatusInternalServerError, M{"error": "enqueue email job failed"})
 		return
@@ -195,12 +268,23 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 
-	storedCode, err := rdb.Get(ctx, codePrefix+email).Result()
+	codeKey := codePrefix + email
+	attemptKey := verificationAttemptKey(email)
+	storedCode, err := rdb.Get(ctx, codeKey).Result()
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest, M{"error": "verification code expired or not found"})
 		return
 	}
 	if storedCode != req.Code {
+		attempts, attemptErr := recordFailedVerificationAttempt(ctx, codeKey, attemptKey, storedCode)
+		if attemptErr != nil {
+			writeJSON(w, http.StatusInternalServerError, M{"error": "verify registration code failed"})
+			return
+		}
+		if attempts < 0 {
+			writeJSON(w, http.StatusBadRequest, M{"error": "verification code expired or not found"})
+			return
+		}
 		writeJSON(w, http.StatusBadRequest, M{"error": "invalid verification code"})
 		return
 	}
@@ -227,7 +311,7 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rdb.Del(ctx, codePrefix+email)
+	rdb.Del(ctx, codeKey, attemptKey)
 	writeJSON(w, http.StatusCreated, M{"message": "registered", "user_id": userID})
 }
 

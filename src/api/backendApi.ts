@@ -10,11 +10,14 @@ export interface BackendPost {
   id: number
   user_id: number
   username: string
+  visibility: PostVisibility
   content?: string
   image_urls?: string[]
   image_status: string
   created_at: string
 }
+
+export type PostVisibility = 'public' | 'private'
 
 export interface FeedResponse {
   posts: BackendPost[]
@@ -131,16 +134,21 @@ export function fetchFeed(cursor?: string) {
   return apiFetch<FeedResponse>(`/api/feed${params}`)
 }
 
-export function createPost(content: string, images: File[] = []) {
+export function createPost(
+  content: string,
+  images: File[] = [],
+  visibility: PostVisibility = 'public',
+) {
   if (images.length === 0) {
     return apiFetch<{ message: string; post_id: number }>('/api/posts', {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, visibility }),
     })
   }
 
   const formData = new FormData()
   formData.append('content', content)
+  formData.append('visibility', visibility)
   images.forEach((image) => formData.append('images', image))
 
   return apiFetch<{ message: string; post_id: number }>('/api/posts', {

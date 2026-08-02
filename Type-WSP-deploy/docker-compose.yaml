@@ -18,6 +18,8 @@ services:
       BACKEND_HOST: api
       BACKEND_PORT: ${API_PORT:?set API_PORT in .env}
       SERVER_NAME: ${SERVER_NAME:?set SERVER_NAME in .env}
+      TLS_CERTIFICATE_PATH: /run/tls/fullchain.pem
+      TLS_PRIVATE_KEY_PATH: /run/tls/privkey.pem
       PORT: 8080
       SSL_PORT: 8443
       DOLLAR: $
@@ -32,7 +34,7 @@ services:
       BLOCKING_PARANOIA: 1
     volumes:
       - ./nginx/templates/conf.d/default.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ${TLS_CERTS_DIR:?set TLS_CERTS_DIR in .env}:/run/tls:ro
       - ./nginx/modsec/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
       - ./nginx/modsec/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf:ro
     networks:
