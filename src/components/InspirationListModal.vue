@@ -4,6 +4,7 @@ import { formatLocalDateKey } from '../utils/date'
 import { useAccessibleDialog } from '../composables/useAccessibleDialog'
 import { useInspirationStore, type InspirationItem } from '../composables/useInspirationStore'
 import DailyTaskPrompt from './DailyTaskPrompt.vue'
+import InspirationDateFilter from './inspiration/InspirationDateFilter.vue'
 
 type SortOrder = 'newest' | 'oldest'
 
@@ -314,76 +315,24 @@ useAccessibleDialog({
               <input v-model="searchText" type="search" placeholder="在清單內搜尋關鍵字">
             </label>
 
-            <div class="inspiration-date-filter">
-              <button
-                type="button"
-                class="inspiration-date-filter-trigger"
-                :aria-expanded="isDateFilterOpen"
-                aria-controls="inspiration-date-panel"
-                @click="isDateFilterOpen ? cancelDateFilter() : openDateFilter()"
-              >
-                所有日期 <span aria-hidden="true">&gt;</span>
-              </button>
-
-              <div v-if="isDateFilterOpen" id="inspiration-date-panel" class="inspiration-date-panel">
-                <button type="button" class="inspiration-filter-reset" @click="resetDateFilter">重設</button>
-
-                <fieldset class="inspiration-date-section">
-                  <legend>開始日期</legend>
-                  <div class="inspiration-date-selects">
-                    <select v-model.number="pendingStartMonth" aria-label="開始月份">
-                      <option v-for="month in monthOptions" :key="month" :value="month">{{ month }}月</option>
-                    </select>
-                    <select v-model.number="pendingStartDay" aria-label="開始日期">
-                      <option v-for="day in startDayOptions" :key="day" :value="day">{{ day }}</option>
-                    </select>
-                    <select v-model.number="pendingStartYear" aria-label="開始年份">
-                      <option v-for="year in yearOptions" :key="year" :value="year">{{ year }}</option>
-                    </select>
-                  </div>
-                </fieldset>
-
-                <fieldset class="inspiration-date-section">
-                  <legend>結束日期</legend>
-                  <div class="inspiration-date-selects">
-                    <select v-model.number="pendingEndMonth" aria-label="結束月份">
-                      <option v-for="month in monthOptions" :key="month" :value="month">{{ month }}月</option>
-                    </select>
-                    <select v-model.number="pendingEndDay" aria-label="結束日期">
-                      <option v-for="day in endDayOptions" :key="day" :value="day">{{ day }}</option>
-                    </select>
-                    <select v-model.number="pendingEndYear" aria-label="結束年份">
-                      <option v-for="year in yearOptions" :key="year" :value="year">{{ year }}</option>
-                    </select>
-                  </div>
-                </fieldset>
-
-                <fieldset class="inspiration-date-section">
-                  <legend>排序依據</legend>
-                  <div class="inspiration-sort-options">
-                    <button
-                      type="button"
-                      :class="{ active: pendingSortOrder === 'newest' }"
-                      @click="pendingSortOrder = 'newest'"
-                    >
-                      從新到舊
-                    </button>
-                    <button
-                      type="button"
-                      :class="{ active: pendingSortOrder === 'oldest' }"
-                      @click="pendingSortOrder = 'oldest'"
-                    >
-                      從舊到新
-                    </button>
-                  </div>
-                </fieldset>
-
-                <div class="inspiration-date-actions">
-                  <button type="button" class="inspiration-apply-filter" @click="applyDateFilter">套用</button>
-                  <button type="button" class="inspiration-cancel-filter" @click="cancelDateFilter">取消</button>
-                </div>
-              </div>
-            </div>
+            <InspirationDateFilter
+              :open="isDateFilterOpen"
+              :month-options="monthOptions"
+              :start-day-options="startDayOptions"
+              :end-day-options="endDayOptions"
+              :year-options="yearOptions"
+              v-model:start-month="pendingStartMonth"
+              v-model:start-day="pendingStartDay"
+              v-model:start-year="pendingStartYear"
+              v-model:end-month="pendingEndMonth"
+              v-model:end-day="pendingEndDay"
+              v-model:end-year="pendingEndYear"
+              v-model:sort-order="pendingSortOrder"
+              @open="openDateFilter"
+              @reset="resetDateFilter"
+              @apply="applyDateFilter"
+              @cancel="cancelDateFilter"
+            />
           </div>
 
           <form class="inspiration-draft" @submit.prevent="addDraft">

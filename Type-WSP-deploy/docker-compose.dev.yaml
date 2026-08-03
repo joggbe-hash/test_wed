@@ -1,6 +1,16 @@
 # Local Docker development overlay. Combine it with docker-compose.yaml; do not
 # use this file in a deployed environment.
 services:
+  mailpit:
+    image: axllent/mailpit:v1.27
+    ports:
+      - "8025:8025"
+    expose:
+      - "1025"
+    networks:
+      - app_net
+    restart: unless-stopped
+
   nginx:
     build:
       dockerfile: Type-WSP-deploy/nginx/Dockerfile.dev
@@ -18,3 +28,15 @@ services:
       - ./nginx/templates/conf.d/default.dev.conf.template:/etc/nginx/templates/conf.d/default.conf.template:ro
       - ./nginx/modsec/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/REQUEST-900-EXCLUSION-RULES-BEFORE-CRS.conf:ro
       - ./nginx/modsec/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf:/etc/modsecurity.d/owasp-crs/rules/RESPONSE-999-EXCLUSION-RULES-AFTER-CRS.conf:ro
+
+  worker:
+    environment:
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      SMTP_FROM: no-reply@type-wsp.local
+      SMTP_USERNAME: ""
+      SMTP_PASSWORD: ""
+      SMTP_SECURE: "false"
+    depends_on:
+      mailpit:
+        condition: service_started

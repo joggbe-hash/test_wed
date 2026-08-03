@@ -54,6 +54,14 @@ Copy-Item .env.example .env
 docker compose up --build
 ```
 
+本機完整環境使用 development overlay；`.env.local` 需提供非機密的本機服務設定，
+包含 `TLS_CERTS_DIR=./nginx/certs`：
+
+```powershell
+docker compose --env-file .env --env-file .env.local `
+  -f docker-compose.yaml -f docker-compose.dev.yaml up --build
+```
+
 啟動前必須替換 `.env` 內的 PostgreSQL、Redis、MinIO 密碼與 `SECRET_KEY`。
 前端由 nginx 的 multi-stage image 直接從原始碼建置，不需也不應提交
 `Type-WSP-deploy/frontend/dist`。
@@ -66,8 +74,16 @@ docker compose up --build
 - `postgres`：user/system database
 - `redis`：session、cache、task stream 與 Pub/Sub
 - `minio`：原圖與處理後圖片
+- `mailpit`（僅 development overlay）：攔截本機驗證信並提供 Web UI
 
-健康檢查端點為 `/api/health`。
+健康檢查端點：
+
+- `/health/live`：API process 存活
+- `/health/ready`：PostgreSQL 與 Redis 均可用
+- `/api/health`：保留給舊客戶端的 liveness 相容路徑
+
+每個 HTTP response 都包含 `X-Request-ID`；API 會以 JSON 記錄 method、route、
+status、response bytes 與 duration，方便本機除錯。
 
 ## 資料庫 migration
 
@@ -85,8 +101,14 @@ API 啟動時會在 advisory lock 保護下執行：
 
 ## 驗證碼郵件
 
-目前 worker 的寄信工作仍是開發用 stub，正式環境不會寄信。依目前決定暫不串接
-SMTP／郵件服務，因此正式註冊流程在此功能完成前不可視為可用。
+Worker 透過 SMTP 寄送驗證碼。開發環境預設連到 Mailpit：
+
+- SMTP：Docker 內部的 `mailpit:1025`
+- 收件匣：`http://localhost:8025/`
+
+可透過 `SMTP_HOST`、`SMTP_PORT`、`SMTP_FROM`、`SMTP_USERNAME`、
+`SMTP_PASSWORD` 與 `SMTP_SECURE` 切換 SMTP 服務。`SMTP_SECURE=true` 代表要求
+STARTTLS。驗證碼與 SMTP 密碼不會寫入 Log，收件地址只記錄遮罩版本。
 
 ## 版本控制
 

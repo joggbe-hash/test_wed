@@ -3,13 +3,14 @@ import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, reactive, 
 import {
   markDailyTaskPromptHandled,
 } from '../composables/useDailyTaskPrompt'
+import { focusWithoutScroll, trapDialogFocus as trapFocus } from '../composables/useDialogFocusTrap'
 import {
   priorityToImportance,
-  taskImportanceCount,
   type Priority,
   type TaskImportance,
   useScheduleMock,
 } from '../composables/useScheduleMock'
+import DailyTaskListView from './schedule/DailyTaskListView.vue'
 
 type Importance = TaskImportance
 type ImportanceSelection = TaskImportance
@@ -39,7 +40,6 @@ const form = reactive({
 const hoverImportance = shallowRef<Importance | null>(null)
 const dialogPanel = useTemplateRef<HTMLElement>('dailyTaskDialog')
 const titleInput = useTemplateRef<HTMLInputElement>('dailyTitleInput')
-const listAddButton = useTemplateRef<HTMLButtonElement>('dailyListAddButton')
 const startTimeInput = useTemplateRef<HTMLInputElement>('dailyStartTimeInput')
 const endTimeInput = useTemplateRef<HTMLInputElement>('dailyEndTimeInput')
 let previousActiveElement = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
@@ -65,63 +65,15 @@ const todayTasks = computed(() =>
 )
 const shouldEmitClose = computed(() => isEditMode.value || Boolean(props.taskDate) || Boolean(props.closeAfterSubmit))
 
-const focusableSelector = [
-  'button:not([disabled])',
-  '[href]',
-  'input:not([disabled])',
-  'select:not([disabled])',
-  'textarea:not([disabled])',
-  '[tabindex]:not([tabindex="-1"])',
-].join(', ')
-
-function focusWithoutScroll(element: HTMLElement | null) {
-  if (!element || !element.isConnected || element === document.body) return
-  element.focus({ preventScroll: true })
-}
-
 function focusCurrentView() {
   void nextTick(() => {
-    focusWithoutScroll(mode.value === 'list' ? listAddButton.value : titleInput.value)
+    const listAddButton = dialogPanel.value?.querySelector<HTMLElement>('[data-daily-list-add]') ?? null
+    focusWithoutScroll(mode.value === 'list' ? listAddButton : titleInput.value)
   })
 }
 
-function getFocusableElements() {
-  const panel = dialogPanel.value
-  if (!panel) return []
-
-  return Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector))
-    .filter((element) => element.getClientRects().length > 0)
-}
-
 function trapDialogFocus(event: KeyboardEvent) {
-  const panel = dialogPanel.value
-  const focusableElements = getFocusableElements()
-  if (!panel || focusableElements.length === 0) {
-    event.preventDefault()
-    focusWithoutScroll(panel)
-    return
-  }
-
-  const firstElement = focusableElements[0]
-  const lastElement = focusableElements[focusableElements.length - 1]
-  const activeElement = document.activeElement
-
-  if (!(activeElement instanceof Node) || !panel.contains(activeElement)) {
-    event.preventDefault()
-    focusWithoutScroll(event.shiftKey ? lastElement : firstElement)
-    return
-  }
-
-  if (event.shiftKey && activeElement === firstElement) {
-    event.preventDefault()
-    focusWithoutScroll(lastElement)
-    return
-  }
-
-  if (!event.shiftKey && activeElement === lastElement) {
-    event.preventDefault()
-    focusWithoutScroll(firstElement)
-  }
+  trapFocus(event, dialogPanel.value)
 }
 
 function resolveReturnFocus() {
@@ -298,21 +250,6 @@ function openAddForm() {
 
 function saveAndClose() {
   closePrompt()
-}
-
-function handleTaskCardWheel(event: WheelEvent) {
-  const container = event.currentTarget as HTMLElement | null
-  if (!container) return
-
-  const delta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX
-  const maxScrollLeft = container.scrollWidth - container.clientWidth
-  if (delta === 0 || maxScrollLeft <= 0) return
-
-  const nextScrollLeft = Math.min(maxScrollLeft, Math.max(0, container.scrollLeft + delta))
-  if (nextScrollLeft === container.scrollLeft) return
-
-  event.preventDefault()
-  container.scrollLeft = nextScrollLeft
 }
 
 const handleKeyDown = (e: KeyboardEvent) => {
@@ -545,32 +482,12 @@ onUnmounted(() => {
         </div>
       </form>
 
-      <div v-else class="daily-task-list-view">
-        <button ref="dailyListAddButton" type="button" class="daily-task-add-again" @click="openAddForm">新增任務 ＋</button>
-
-        <section class="daily-task-list-panel" aria-label="今日任務清單">
-          <header class="daily-task-list-header">
-            <span aria-hidden="true">▾</span>
-            <h3>今天有{{ todayTasks.length }}項任務</h3>
-          </header>
-
-          <div class="daily-task-card-row" @wheel="handleTaskCardWheel">
-            <article v-for="task in todayTasks" :key="task.id" class="daily-task-card">
-              <div class="daily-task-card-priority" aria-hidden="true">
-                <span
-                  v-for="dot in taskImportanceCount(task)"
-                  :key="dot"
-                  class="filled"
-                ></span>
-              </div>
-              <h4>{{ task.title }}</h4>
-              <p>{{ task.note || '（無備註）' }}</p>
-            </article>
-          </div>
-        </section>
-
-        <button type="button" class="daily-task-save-list" @click="saveAndClose">儲存</button>
-      </div>
+      <DailyTaskListView
+        v-else
+        :tasks="todayTasks"
+        @add="openAddForm"
+        @save="saveAndClose"
+      />
 
       <button v-if="mode === 'form' && !isEditMode" type="button" class="daily-task-skip" @click="closePrompt">
         跳過

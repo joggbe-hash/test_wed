@@ -159,7 +159,7 @@ func processTask(ctx context.Context, task Task) error {
 		if err := json.Unmarshal(task.Payload, &payload); err != nil {
 			return fmt.Errorf("decode EmailPayload failed: %w", err)
 		}
-		return handleSendEmail(payload)
+		return handleSendEmail(ctx, payload)
 	default:
 		return fmt.Errorf("unknown task type %q", task.Type)
 	}

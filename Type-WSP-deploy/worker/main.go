@@ -19,6 +19,7 @@ var (
 	minioClient *minio.Client
 	systemPool  *pgxpool.Pool
 	minioBucket string
+	mailSender  MailSender
 )
 
 // ImagePostPayload 由 API 建立圖文貼文後送進 queue，worker 負責處理 raw_keys。
@@ -59,6 +60,7 @@ func main() {
 		log.Fatalf("connect MinIO failed: %v", err)
 	}
 	minioBucket = cfg.MinioBucket
+	mailSender = NewSMTPMailSender(cfg)
 
 	exists, err := minioClient.BucketExists(ctx, minioBucket)
 	if err != nil {
@@ -100,10 +102,13 @@ func workerPostgresDSN(cfg *Config) string {
 	return dsn.String()
 }
 
-func handleSendEmail(payload EmailPayload) error {
+func handleSendEmail(ctx context.Context, payload EmailPayload) error {
 	if payload.Email == "" || payload.Code == "" {
 		return fmt.Errorf("invalid email payload")
 	}
-	log.Printf("[email] verification email job accepted for %s", payload.Email)
+	if err := mailSender.SendVerificationCode(ctx, payload.Email, payload.Code); err != nil {
+		return fmt.Errorf("send verification email failed: %w", err)
+	}
+	log.Printf("verification email sent recipient=%s", maskEmail(payload.Email))
 	return nil
 }

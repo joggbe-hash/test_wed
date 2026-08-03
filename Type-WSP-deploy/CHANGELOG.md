@@ -2,6 +2,15 @@
 
 > 記錄 2026-05-24 ~ 2026-05-25
 
+## 2026-08-04 — 開發環境寄信、健康檢查與可觀測性
+
+- Worker 新增可替換的 `MailSender` 與 SMTP 實作，寄送失敗沿用 Redis Stream 重試及 Dead Letter。
+- development Compose 新增 Mailpit，Web UI 使用 `http://localhost:8025/`。
+- API 新增 `/health/live`、`/health/ready`，並保留 `/api/health` 相容端點。
+- API 新增 JSON HTTP request log 與 `X-Request-ID`。
+- 登入頁流程移至 auth composable；任務清單與靈感日期篩選拆成 typed 子元件。
+- 新增 SMTP、健康檢查、HTTP middleware、Vue 子元件及註冊 E2E 測試。
+
 ---
 
 ## 2026-07-25 — 維運結構修正與 nginx 部署
@@ -302,7 +311,7 @@ API WebSocket handler（持續訂閱 Redis channel）
 
 ## 8. 尚未實作（TODO）
 
-- [ ] 驗證碼寄信：目前 Worker 僅 log 輸出，需接入 SMTP / SendGrid / AWS SES
+- [x] 驗證碼寄信：Worker 已接入可設定 SMTP，開發環境使用 Mailpit
 - [x] 限制 `debug_code`：正式部署預設不回傳；僅 `APP_ENV=development` 且 `EXPOSE_VERIFICATION_CODE=true` 時允許
 - [ ] `.env` 密碼替換：所有 `change_me_*` 需換成強密碼
 - [ ] SSL 憑證：自簽憑證換成 Let's Encrypt 正式憑證

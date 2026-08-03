@@ -24,6 +24,13 @@ type Config struct {
 	MinioSecretKey string
 	MinioBucket    string
 	MinioSecure    bool
+
+	SMTPHost     string
+	SMTPPort     int
+	SMTPFrom     string
+	SMTPUsername string
+	SMTPPassword string
+	SMTPSecure   bool
 }
 
 func LoadConfig() (*Config, error) {
@@ -79,6 +86,22 @@ func LoadConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	smtpHost, err := environmentValue(environment, "SMTP_HOST", "mailpit")
+	if err != nil {
+		return nil, err
+	}
+	smtpPort, err := positiveEnvIntForEnvironment(environment, "SMTP_PORT", 1025)
+	if err != nil {
+		return nil, err
+	}
+	smtpFrom, err := environmentValue(environment, "SMTP_FROM", "no-reply@type-wsp.local")
+	if err != nil {
+		return nil, err
+	}
+	smtpSecure, err := environmentBool(environment, "SMTP_SECURE", false)
+	if err != nil {
+		return nil, err
+	}
 
 	return &Config{
 		AppEnv:           environment,
@@ -94,7 +117,28 @@ func LoadConfig() (*Config, error) {
 		MinioSecretKey:   minioSecretKey,
 		MinioBucket:      minioBucket,
 		MinioSecure:      minioSecure,
+		SMTPHost:         smtpHost,
+		SMTPPort:         smtpPort,
+		SMTPFrom:         smtpFrom,
+		SMTPUsername:     strings.TrimSpace(os.Getenv("SMTP_USERNAME")),
+		SMTPPassword:     os.Getenv("SMTP_PASSWORD"),
+		SMTPSecure:       smtpSecure,
 	}, nil
+}
+
+func positiveEnvIntForEnvironment(environment, key string, developmentFallback int) (int, error) {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		if environment == "development" || environment == "test" {
+			return developmentFallback, nil
+		}
+		return 0, fmt.Errorf("%s is required when APP_ENV=%s", key, environment)
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value <= 0 || value > 65535 {
+		return 0, fmt.Errorf("%s must be a valid TCP port", key)
+	}
+	return value, nil
 }
 
 func environmentValue(environment, key, developmentFallback string) (string, error) {
