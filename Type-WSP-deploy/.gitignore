@@ -2,6 +2,10 @@
 .agents/
 skills-lock.json
 nginx/certs/*.pem
+nginx/certs/*.key
+nginx/certs/*.crt
+nginx/certs/*.p12
+nginx/certs/*.pfx
 nginx/certs/openssl-san.cnf
 __pycache__/
 *.pyc
