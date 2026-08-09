@@ -32,13 +32,24 @@ func TestNormalizeUsername(t *testing.T) {
 }
 
 func TestValidatePassword(t *testing.T) {
-	if err := validatePassword("secure123"); err != nil {
-		t.Fatalf("valid password rejected: %v", err)
+	for _, input := range []string{"secure123", "密碼安全測試七8號"} {
+		if err := validatePassword(input); err != nil {
+			t.Fatalf("valid password %q rejected: %v", input, err)
+		}
 	}
 
-	for _, input := range []string{"a1", "onlyletters", "12345678", strings.Repeat("a", 72) + "1"} {
-		if err := validatePassword(input); err == nil {
-			t.Errorf("validatePassword(%q) accepted weak input", input)
+	tests := []struct {
+		input   string
+		message string
+	}{
+		{"密碼a123", "密碼至少需要 8 個字元"},
+		{strings.Repeat("密", 24) + "1", "密碼過長，請縮短後再試"},
+		{"onlyletters", "密碼須包含至少一個字母與一個數字"},
+		{"12345678", "密碼須包含至少一個字母與一個數字"},
+	}
+	for _, test := range tests {
+		if err := validatePassword(test.input); err == nil || err.Error() != test.message {
+			t.Errorf("validatePassword(%q) = %v, want %q", test.input, err, test.message)
 		}
 	}
 }

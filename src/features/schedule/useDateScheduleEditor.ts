@@ -1,5 +1,5 @@
 import { computed, reactive, shallowRef, type DeepReadonly } from 'vue'
-import { useScheduleMock } from '../../composables/useScheduleMock'
+import { useSchedule } from '../../composables/useSchedule'
 import { formatLocalDateKey } from '../../utils/date'
 import type { Priority, ReminderItem, TaskItem } from './types'
 
@@ -42,7 +42,7 @@ export function useDateScheduleEditor(options: DateScheduleEditorOptions) {
     addReminder,
     updateTask,
     updateReminder,
-  } = useScheduleMock()
+  } = useSchedule()
   const editingKind = shallowRef<DateScheduleEditingKind | null>(null)
   const editingId = shallowRef<number | null>(null)
   const isDailyTaskPromptOpen = shallowRef(false)
@@ -69,13 +69,11 @@ export function useDateScheduleEditor(options: DateScheduleEditorOptions) {
   const reminderEditorDateKey = computed(() => editForm.date || options.props.dateKey)
   const reminderEditorDate = computed(() => parseDateKey(reminderEditorDateKey.value))
   const reminderEditorDay = computed(() => reminderEditorDate.value.getDate())
-  const reminderEditorDateLabel = computed(() =>
-    new Intl.DateTimeFormat('zh-TW', {
-      month: 'numeric',
-      day: 'numeric',
-      weekday: 'short',
-    }).format(reminderEditorDate.value),
-  )
+  const reminderEditorDateLabel = computed(() => {
+    const editorDate = reminderEditorDate.value
+    const weekday = new Intl.DateTimeFormat('zh-TW', { weekday: 'short' }).format(editorDate)
+    return `${editorDate.getMonth() + 1}月${editorDate.getDate()}日 ${weekday}`
+  })
   const dateReminders = computed(() =>
     sortedReminders.value.filter((reminder) => reminder.date === options.props.dateKey),
   )

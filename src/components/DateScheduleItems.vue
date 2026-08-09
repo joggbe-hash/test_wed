@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { priorityMeta, taskImportanceCount, type ReminderItem, type TaskItem } from '../composables/useScheduleMock'
+import { priorityMeta, taskImportanceCount, type ReminderItem, type TaskItem } from '../composables/useSchedule'
 
 defineProps<{ reminders: ReminderItem[], tasks: TaskItem[] }>()
 const emit = defineEmits<{

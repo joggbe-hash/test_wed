@@ -4,9 +4,9 @@ import MainLayout from '../layouts/MainLayout.vue'
 import SidebarWidgets from '../components/SidebarWidgets.vue'
 import DateSelect from '../components/DateSelect.vue'
 import TimeSelect from '../components/TimeSelect.vue'
-import { useScheduleMock } from '../composables/useScheduleMock'
+import { useSchedule } from '../composables/useSchedule'
 
-const { todayKey, todayReminders, addReminder } = useScheduleMock()
+const { todayKey, todayReminders, addReminder } = useSchedule()
 
 const reminderForm = reactive({
   title: '',

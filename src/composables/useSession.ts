@@ -1,6 +1,6 @@
 import { readonly, shallowRef } from 'vue'
 import { ApiError, checkCurrentSession, type User } from '../api/backendApi'
-import { clearScheduleOwner, setScheduleOwner } from './useScheduleMock'
+import { clearScheduleOwner, setScheduleOwner } from './useSchedule'
 import { useFeedStore } from '../stores/useFeedStore'
 
 const currentUser = shallowRef<User | null>(null)
@@ -13,9 +13,12 @@ interface RestoreCurrentSessionOptions {
 }
 
 function commitCurrentSession(user: User) {
+  const didAccountChange = currentUser.value !== null && currentUser.value.id !== user.id
+  if (didAccountChange) useFeedStore().reset()
+
   currentUser.value = user
   isSessionInitialized.value = true
-  setScheduleOwner(user.id)
+  void setScheduleOwner(user.id)
 }
 
 function commitLoggedOutSession() {

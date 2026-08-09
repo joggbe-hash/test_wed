@@ -1,32 +1,23 @@
 import { notifyUnauthorized } from './unauthorizedHandler'
+import type {
+  ApiMessageResponse,
+  CreatePostResponse,
+  CurrentSessionResponse,
+  FeedResponse,
+  PostVisibility,
+  RegisterAccountRequest,
+  SendVerificationCodeResponse,
+  User,
+} from './contracts'
+import type { StoredSchedule } from '../features/schedule/types'
 
-export interface User {
-  id: number
-  username: string
-  email: string
-}
-
-export interface BackendPost {
-  id: number
-  user_id: number
-  username: string
-  visibility: PostVisibility
-  content?: string
-  image_urls?: string[]
-  image_status: string
-  created_at: string
-}
-
-export type PostVisibility = 'public' | 'private'
-
-export interface FeedResponse {
-  posts: BackendPost[]
-  next_cursor: string
-}
-
-export interface CurrentSessionResponse {
-  user: User
-}
+export type {
+  BackendPost,
+  FeedResponse,
+  ImageStatus,
+  PostVisibility,
+  User,
+} from './contracts'
 
 export class ApiError extends Error {
   status: number
@@ -56,6 +47,7 @@ async function apiFetch<T>(
     headers: {
       ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
       ...init.headers,
+      'X-Type-WSP-Request': '1',
     },
   })
 
@@ -86,18 +78,13 @@ async function apiFetch<T>(
 }
 
 export function sendVerificationCode(email: string) {
-  return apiFetch<{ message: string }>('/api/auth/send-code', {
+  return apiFetch<SendVerificationCodeResponse>('/api/auth/send-code', {
     method: 'POST',
     body: JSON.stringify({ email }),
   })
 }
 
-export function registerAccount(payload: {
-  username: string
-  email: string
-  password: string
-  code: string
-}) {
+export function registerAccount(payload: RegisterAccountRequest) {
   return apiFetch<{ message: string; user_id: number }>('/api/auth/register', {
     method: 'POST',
     body: JSON.stringify(payload),
@@ -124,7 +111,7 @@ export function checkCurrentSession() {
 }
 
 export function logoutAccount() {
-  return apiFetch<{ message: string }>('/api/auth/logout', {
+  return apiFetch<ApiMessageResponse>('/api/auth/logout', {
     method: 'POST',
   })
 }
@@ -134,13 +121,18 @@ export function fetchFeed(cursor?: string) {
   return apiFetch<FeedResponse>(`/api/feed${params}`)
 }
 
+export function fetchMyPosts(cursor?: string) {
+  const params = cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''
+  return apiFetch<FeedResponse>(`/api/posts/me${params}`)
+}
+
 export function createPost(
   content: string,
   images: File[] = [],
   visibility: PostVisibility = 'public',
 ) {
   if (images.length === 0) {
-    return apiFetch<{ message: string; post_id: number }>('/api/posts', {
+    return apiFetch<CreatePostResponse>('/api/posts', {
       method: 'POST',
       body: JSON.stringify({ content, visibility }),
     })
@@ -151,14 +143,56 @@ export function createPost(
   formData.append('visibility', visibility)
   images.forEach((image) => formData.append('images', image))
 
-  return apiFetch<{ message: string; post_id: number }>('/api/posts', {
+  return apiFetch<CreatePostResponse>('/api/posts', {
     method: 'POST',
     body: formData,
   })
 }
 
 export function deletePost(postId: number) {
-  return apiFetch<{ message: string }>(`/api/posts/${postId}`, {
+  return apiFetch<ApiMessageResponse>(`/api/posts/${postId}`, {
+    method: 'DELETE',
+  })
+}
+
+export interface InspirationItemResponse {
+  id: number
+  date: string
+  text: string
+  imageLabel?: string
+}
+
+export function fetchSchedule() {
+  return apiFetch<StoredSchedule>('/api/schedule')
+}
+
+export function saveSchedule(schedule: StoredSchedule) {
+  return apiFetch<StoredSchedule>('/api/schedule', {
+    method: 'PUT',
+    body: JSON.stringify(schedule),
+  })
+}
+
+export function fetchInspirations() {
+  return apiFetch<{ items: InspirationItemResponse[] }>('/api/inspirations')
+}
+
+export function createInspiration(payload: Omit<InspirationItemResponse, 'id'>) {
+  return apiFetch<InspirationItemResponse>('/api/inspirations', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateInspiration(id: number, text: string) {
+  return apiFetch<ApiMessageResponse>(`/api/inspirations/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ text }),
+  })
+}
+
+export function deleteInspiration(id: number) {
+  return apiFetch<ApiMessageResponse>(`/api/inspirations/${id}`, {
     method: 'DELETE',
   })
 }

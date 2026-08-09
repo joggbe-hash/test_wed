@@ -34,6 +34,7 @@ function siteMetadataPlugin(siteUrl: string | undefined): Plugin {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, '.', 'VITE_')
+  const devApiTarget = env.VITE_DEV_API_TARGET?.trim()
 
   return {
     plugins: [
@@ -42,5 +43,17 @@ export default defineConfig(({ mode }) => {
       siteMetadataPlugin(env.VITE_SITE_URL),
     ],
     base: normalizeBasePath(env.VITE_BASE_PATH),
+    server: devApiTarget
+      ? {
+          proxy: {
+            '/api': {
+              target: devApiTarget,
+              changeOrigin: true,
+              secure: false,
+              ws: true,
+            },
+          },
+        }
+      : undefined,
   }
 })

@@ -1,20 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, shallowRef } from 'vue'
+import { computed, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import MainLayout from '../layouts/MainLayout.vue'
 import AccountSessionPanel from '../components/settings/AccountSessionPanel.vue'
 import SettingsActionCard from '../components/settings/SettingsActionCard.vue'
 import { logoutAccount } from '../api/backendApi'
-import {
-  fetchFreqData,
-  type FreqActionId,
-  type FreqActionSummary,
-} from '../api/timedApi'
 import { showIntroduceModal } from '../composables/useModal'
 import { useSession } from '../composables/useSession'
 
+type SettingsActionId = 'profile' | 'explore' | 'notifications' | 'settings'
+
 interface SettingsAction {
-  id: FreqActionId
+  id: SettingsActionId
   title: string
   description: string
   icon: string
@@ -25,55 +22,49 @@ interface SettingsAction {
 
 const router = useRouter()
 const { clearCurrentSession, currentUser } = useSession()
-const isLoading = shallowRef(true)
 const isLoggingOut = shallowRef(false)
-const loadErrorMessage = shallowRef('')
 const logoutErrorMessage = shallowRef('')
 const actionNotice = shallowRef('')
-const actionSummaries = shallowRef<FreqActionSummary[]>([])
 
-const actionMetadata: Record<FreqActionId, Omit<SettingsAction, 'id' | 'title'>> = {
-  profile: {
+const settingsActions: SettingsAction[] = [
+  {
+    id: 'profile',
+    title: '使用者首頁',
     description: '查看個人頁面，管理公開身分與已發布的內容。',
     icon: 'account_circle',
     actionLabel: '查看個人頁',
     path: '/personal',
   },
-  explore: {
+  {
+    id: 'explore',
+    title: '探索社群',
     description: '回到探索頁，繼續尋找感興趣的主題與社群。',
     icon: 'article',
     actionLabel: '前往探索',
     path: '/explore',
   },
-  notifications: {
+  {
+    id: 'notifications',
+    title: '通知中心',
     description: '集中查看提醒、互動消息與重要系統通知。',
     icon: 'notifications',
     actionLabel: '查看狀態',
     notice: '通知中心正在準備中，之後會在這裡集中顯示所有提醒。',
   },
-  settings: {
+  {
+    id: 'settings',
+    title: '設定與偏好',
     description: '調整帳號、隱私與個人化使用體驗。',
     icon: 'format_list_bulleted',
     actionLabel: '查看狀態',
     notice: '更多帳號與隱私設定正在準備中。',
   },
-}
-
-const settingsActions = computed<SettingsAction[]>(() =>
-  actionSummaries.value.map(({ id, title }) => ({
-    id,
-    title,
-    ...actionMetadata[id],
-  })),
-)
+]
 
 const displayName = computed(() => currentUser.value?.username?.trim() || '使用者')
-const displayEmail = computed(() => currentUser.value?.email || '目前帳號')
 const profileInitial = computed(() => Array.from(displayName.value)[0]?.toLocaleUpperCase() || 'U')
 
 function resetScreenState() {
-  actionSummaries.value = []
-  loadErrorMessage.value = ''
   logoutErrorMessage.value = ''
   actionNotice.value = ''
   showIntroduceModal.value = false
@@ -108,24 +99,6 @@ async function handleLogout() {
   }
 }
 
-async function loadSettings() {
-  isLoading.value = true
-  loadErrorMessage.value = ''
-
-  try {
-    const response = await fetchFreqData()
-    actionSummaries.value = response.data.actions
-  } catch (error) {
-    actionSummaries.value = []
-    loadErrorMessage.value = error instanceof Error ? error.message : '載入資料失敗'
-  } finally {
-    isLoading.value = false
-  }
-}
-
-onMounted(() => {
-  void loadSettings()
-})
 </script>
 
 <template>
@@ -135,16 +108,7 @@ onMounted(() => {
     sidebar-class="freq-settings-sidebar"
     feed-class="freq-settings-feed"
   >
-    <div v-if="isLoading" class="settings-loading" role="status" aria-live="polite">
-      <span class="sr-only">設定中心載入中...</span>
-      <div class="settings-loading__heading"></div>
-      <div class="settings-loading__profile"></div>
-      <div class="settings-loading__grid" aria-hidden="true">
-        <div v-for="index in 4" :key="index" class="settings-loading__card"></div>
-      </div>
-    </div>
-
-    <main v-else class="settings-shell">
+    <main class="settings-shell">
       <header class="settings-heading">
         <div>
           <p class="settings-heading__eyebrow">ACCOUNT CENTER</p>
@@ -158,7 +122,6 @@ onMounted(() => {
           <div class="profile-summary__copy">
             <span class="profile-summary__label">目前登入</span>
             <strong class="profile-summary__name text-balance">{{ displayName }}</strong>
-            <span class="profile-summary__email text-pretty">{{ displayEmail }}</span>
           </div>
         </div>
         <div class="profile-summary__status">
@@ -180,17 +143,7 @@ onMounted(() => {
           </p>
         </div>
 
-        <div v-if="loadErrorMessage" class="settings-load-error" role="alert">
-          <div>
-            <strong class="settings-load-error__title text-balance">設定資料暫時無法載入</strong>
-            <p class="settings-load-error__description text-pretty">{{ loadErrorMessage }}</p>
-          </div>
-          <button type="button" class="settings-load-error__retry" @click="loadSettings">
-            重新載入
-          </button>
-        </div>
-
-        <div v-else class="settings-action-grid">
+        <div class="settings-action-grid">
           <SettingsActionCard
             v-for="(action, index) in settingsActions"
             :key="action.id"
@@ -220,8 +173,7 @@ onMounted(() => {
 <style scoped>
 @reference "../style.css";
 
-.settings-shell,
-.settings-loading {
+.settings-shell {
   @apply mx-auto flex w-full max-w-[1180px] flex-col gap-8;
 }
 
@@ -266,10 +218,6 @@ onMounted(() => {
   @apply mt-2 truncate text-3xl font-bold leading-tight max-md:text-2xl;
 }
 
-.profile-summary__email {
-  @apply mt-2 truncate text-sm text-white/75;
-}
-
 .profile-summary__status {
   @apply flex shrink-0 items-center gap-3 rounded-full border border-white/30 bg-white/10 px-4 py-2 text-xs font-semibold;
 }
@@ -302,36 +250,4 @@ onMounted(() => {
   @apply rounded-xl border border-border-soft bg-surface-warm px-5 py-4 text-sm leading-6 text-brown shadow-sm;
 }
 
-.settings-load-error {
-  @apply flex items-center justify-between gap-8 rounded-2xl border border-[#e3c7c7] bg-[#fff7f7] p-6 max-md:flex-col max-md:items-stretch max-md:gap-5;
-}
-
-.settings-load-error__title {
-  @apply text-base font-bold text-danger-strong;
-}
-
-.settings-load-error__description {
-  @apply mt-2 text-sm leading-6 text-[#7b5555];
-}
-
-.settings-load-error__retry {
-  @apply min-h-11 shrink-0 rounded-xl border border-[#cc8f8f] bg-white px-5 py-3 text-sm font-bold text-danger-strong hover:border-danger-strong hover:bg-[#fff0f0] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-danger-strong;
-  font: inherit;
-}
-
-.settings-loading__heading {
-  @apply h-24 w-full rounded-2xl bg-white/60;
-}
-
-.settings-loading__profile {
-  @apply h-52 w-full rounded-3xl bg-brown/35;
-}
-
-.settings-loading__grid {
-  @apply grid grid-cols-2 gap-5 max-md:grid-cols-1;
-}
-
-.settings-loading__card {
-  @apply h-64 rounded-2xl border border-border-soft bg-white/55;
-}
 </style>

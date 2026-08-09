@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestAuthSessionRouteRequiresAuthentication(t *testing.T) {
@@ -47,13 +49,82 @@ func TestAuthSessionRouteReturnsAuthenticatedUser(t *testing.T) {
 	}
 
 	var body struct {
-		User User `json:"user"`
+		User struct {
+			ID       int     `json:"id"`
+			Username string  `json:"username"`
+			Email    *string `json:"email"`
+		} `json:"user"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	if body.User != *user {
-		t.Fatalf("user = %#v, want %#v", body.User, *user)
+	if body.User.ID != user.ID || body.User.Username != user.Username {
+		t.Fatalf("user = %#v, want id=%d username=%q", body.User, user.ID, user.Username)
+	}
+	if body.User.Email != nil || strings.Contains(response.Body.String(), user.Email) {
+		t.Fatalf("session response exposed email: %s", response.Body.String())
+	}
+}
+
+func TestSessionCookiePersistenceMatchesRememberChoice(t *testing.T) {
+	standard := sessionCookieForLogin("signed-session", time.Hour, false)
+	if standard.MaxAge != 0 {
+		t.Fatalf("standard login MaxAge = %d, want session cookie", standard.MaxAge)
+	}
+
+	remembered := sessionCookieForLogin("signed-session", 30*24*time.Hour, true)
+	if remembered.MaxAge != int((30 * 24 * time.Hour).Seconds()) {
+		t.Fatalf("remembered login MaxAge = %d", remembered.MaxAge)
+	}
+}
+
+func TestAuthenticatedRememberedSessionRefreshesBrowserIdleDeadline(t *testing.T) {
+	user := &User{ID: 7, Username: "demo", sessionPersistent: true}
+	mux := newMuxWithSessionLoader(func(context.Context, string) (*User, error) {
+		return user, nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: "signed-session"})
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, req)
+
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("refreshed cookies = %#v, want one session cookie", cookies)
+	}
+	if cookies[0].Name != "session" || cookies[0].Value != "signed-session" {
+		t.Fatalf("refreshed cookie = %#v", cookies[0])
+	}
+	if cookies[0].MaxAge != int(rememberSessionTTL.Seconds()) {
+		t.Fatalf("refreshed MaxAge = %d, want %d", cookies[0].MaxAge, int(rememberSessionTTL.Seconds()))
+	}
+}
+
+func TestAuthenticatedBrowserSessionDoesNotBecomePersistent(t *testing.T) {
+	mux := newMuxWithSessionLoader(func(context.Context, string) (*User, error) {
+		return &User{ID: 7, Username: "demo"}, nil
+	})
+	response := serveSessionRequest(mux)
+
+	if cookies := response.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("standard session unexpectedly received a persistent cookie: %#v", cookies)
+	}
+}
+
+func TestLogoutAllRouteIsNotExposed(t *testing.T) {
+	mux := newMuxWithSessionLoader(func(context.Context, string) (*User, error) {
+		t.Fatal("removed route should not load a session")
+		return nil, nil
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout-all", nil)
+	req.Header.Set("X-Type-WSP-Request", "1")
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, req)
+
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
 	}
 }
 
@@ -86,13 +157,30 @@ func TestVerificationCodeResponseRequiresExplicitDevelopmentGate(t *testing.T) {
 	})
 
 	debugVerificationCode = false
-	if _, exposed := verificationCodeResponse("123456")["debug_code"]; exposed {
+	if _, exposed := verificationCodeResponse("challenge-id", "123456")["debug_code"]; exposed {
 		t.Fatal("debug_code was exposed with the gate disabled")
 	}
 
 	debugVerificationCode = true
-	if code := verificationCodeResponse("123456")["debug_code"]; code != "123456" {
+	if code := verificationCodeResponse("challenge-id", "123456")["debug_code"]; code != "123456" {
 		t.Fatalf("debug_code = %#v, want %q", code, "123456")
+	}
+}
+
+func TestInitAuthUsesSecureCookiesOutsideDevelopment(t *testing.T) {
+	previous := sessionCookieSecure
+	t.Cleanup(func() {
+		sessionCookieSecure = previous
+	})
+
+	InitAuth(&Config{AppEnv: "development"})
+	if sessionCookieSecure {
+		t.Fatal("development session cookie was unexpectedly secure")
+	}
+
+	InitAuth(&Config{AppEnv: "production"})
+	if !sessionCookieSecure {
+		t.Fatal("production session cookie was not secure")
 	}
 }
 
@@ -141,6 +229,49 @@ func TestGenerateVerificationCodeFormat(t *testing.T) {
 				t.Fatalf("code %q contains non-digit %q", code, digit)
 			}
 		}
+	}
+}
+
+func TestDestroySessionPropagatesStoreFailure(t *testing.T) {
+	previousSecret := sessionSecret
+	sessionSecret = []byte("test-session-secret")
+	t.Cleanup(func() { sessionSecret = previousSecret })
+
+	wantErr := errors.New("redis unavailable")
+	called := false
+	err := destroySessionWithStore(context.Background(), signSID("session-id"), func(_ context.Context, key, channel string) error {
+		called = true
+		if key != sessionPrefix+"session-id" {
+			t.Fatalf("session key = %q", key)
+		}
+		if channel != sessionRevocationChannel("session-id") {
+			t.Fatalf("revocation channel = %q", channel)
+		}
+		return wantErr
+	})
+	if !called {
+		t.Fatal("session store was not called")
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("DestroySession error = %v, want %v", err, wantErr)
+	}
+}
+
+func TestLogoutReportsSessionStoreFailureAndClearsCookie(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: "signed-session"})
+	response := httptest.NewRecorder()
+
+	handleLogoutWithDestroyer(response, req, func(context.Context, string) error {
+		return errors.New("redis unavailable")
+	})
+
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
+	}
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Name != "session" || cookies[0].MaxAge >= 0 {
+		t.Fatalf("logout did not clear the browser cookie: %#v", cookies)
 	}
 }
 

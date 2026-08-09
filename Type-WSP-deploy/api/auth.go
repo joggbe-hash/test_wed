@@ -3,17 +3,21 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log"
 	"math/big"
 	"net/http"
 	"net/mail"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/redis/go-redis/v9"
 	"golang.org/x/crypto/bcrypt"
@@ -22,51 +26,150 @@ import (
 )
 
 const (
-	codePrefix                     = "vcode:"
-	verificationAttemptsPrefix     = "vcode:attempts:"
-	verificationSendCooldownPrefix = "vcode:send-cooldown:"
-	codeTTL                        = 5 * time.Minute
-	verificationCodeAttemptLimit   = 5
-	verificationCodeSendCooldown   = time.Minute
-	rememberSessionTTL             = 30 * 24 * time.Hour
-	maxAuthRequestBytes            = 64 << 10
-	minUsernameRunes               = 2
-	maxUsernameRunes               = 20
-	minPasswordBytes               = 8
-	maxPasswordBytes               = 72
+	codePrefix                         = "vcode:"
+	verificationActivePrefix           = "vcode:active:"
+	verificationAttemptsPrefix         = "vcode:attempts:challenge:"
+	verificationClientAttemptsPrefix   = "vcode:attempts:client:"
+	verificationSendCooldownPrefix     = "vcode:send-cooldown:"
+	verificationSendHourlyPrefix       = "vcode:send-hourly:"
+	verificationSendDailyPrefix        = "vcode:send-daily:"
+	verificationClientSendHourlyPrefix = "vcode:send-client-hourly:"
+	verificationClientSendDailyPrefix  = "vcode:send-client-daily:"
+	codeTTL                            = 5 * time.Minute
+	verificationCodeAttemptLimit       = 5
+	verificationChallengeAttemptLimit  = 20
+	verificationCodeSendCooldown       = time.Minute
+	verificationCodeHourlySendLimit    = 5
+	verificationCodeDailySendLimit     = 10
+	verificationClientHourlySendLimit  = 20
+	verificationClientDailySendLimit   = 50
+	loginAttemptPrefix                 = "login:attempts:"
+	accountLoginAttemptPrefix          = "login:account-attempts:"
+	loginAttemptLimit                  = 10
+	loginAttemptWindow                 = 5 * time.Minute
+	accountLoginAttemptLimit           = 25
+	accountLoginAttemptWindow          = 15 * time.Minute
+	rememberSessionTTL                 = 30 * 24 * time.Hour
+	maxAuthRequestBytes                = 64 << 10
+	minUsernameRunes                   = 2
+	maxUsernameRunes                   = 20
+	minPasswordRunes                   = 8
+	maxPasswordBytes                   = 72
 )
 
-var debugVerificationCode bool
+var (
+	debugVerificationCode  bool
+	sessionCookieSecure    = true
+	dummyLoginPasswordHash = []byte("$2a$12$hVErFRzichm5h6hlc/CBx.97BpxRbUaDSfkqS5dBrr06P0Yd48E0q")
+)
 
 var (
-	storeVerificationCodeScript = redis.NewScript(`
-redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[2])
-redis.call('DEL', KEYS[2])
+	reserveVerificationSendScript = redis.NewScript(`
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  return -1
+end
+local hourly = tonumber(redis.call('GET', KEYS[2]) or '0')
+local daily = tonumber(redis.call('GET', KEYS[3]) or '0')
+local clientHourly = tonumber(redis.call('GET', KEYS[4]) or '0')
+local clientDaily = tonumber(redis.call('GET', KEYS[5]) or '0')
+if hourly >= tonumber(ARGV[1]) then
+  return -2
+end
+if daily >= tonumber(ARGV[2]) then
+  return -3
+end
+if clientHourly >= tonumber(ARGV[3]) then
+  return -4
+end
+if clientDaily >= tonumber(ARGV[4]) then
+  return -5
+end
+redis.call('SET', KEYS[1], '1', 'PX', ARGV[5])
+hourly = redis.call('INCR', KEYS[2])
+if hourly == 1 then
+  redis.call('PEXPIRE', KEYS[2], ARGV[6])
+end
+daily = redis.call('INCR', KEYS[3])
+if daily == 1 then
+  redis.call('PEXPIRE', KEYS[3], ARGV[7])
+end
+clientHourly = redis.call('INCR', KEYS[4])
+if clientHourly == 1 then
+  redis.call('PEXPIRE', KEYS[4], ARGV[6])
+end
+clientDaily = redis.call('INCR', KEYS[5])
+if clientDaily == 1 then
+  redis.call('PEXPIRE', KEYS[5], ARGV[7])
+end
 return 1
 `)
-	recordFailedVerificationAttemptScript = redis.NewScript(`
+	rollbackVerificationSendScript = redis.NewScript(`
+redis.call('DEL', KEYS[1])
+for i = 2, 5 do
+  local current = tonumber(redis.call('GET', KEYS[i]) or '0')
+  if current > 1 then
+    redis.call('DECR', KEYS[i])
+  elseif current == 1 then
+    redis.call('DEL', KEYS[i])
+  end
+end
+return 1
+`)
+	activateVerificationChallengeScript = redis.NewScript(`
+redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[3])
+redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
+return 1
+`)
+	rollbackVerificationChallengeScript = redis.NewScript(`
+if redis.call('GET', KEYS[2]) == ARGV[1] then
+  redis.call('DEL', KEYS[1], KEYS[2])
+end
+return 1
+`)
+	consumeVerificationCodeScript = redis.NewScript(`
 local storedCode = redis.call('GET', KEYS[1])
-if not storedCode or storedCode ~= ARGV[1] then
+local activeChallenge = redis.call('GET', KEYS[2])
+if not storedCode or activeChallenge ~= ARGV[1] then
   return -1
+end
+-- A correct code wins before any failure budget check so another client cannot
+-- lock the legitimate recipient out by deliberately exhausting attempts.
+if storedCode == ARGV[2] then
+  redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
+  return 1
+end
+local clientAttempts = tonumber(redis.call('GET', KEYS[3]) or '0')
+local challengeAttempts = tonumber(redis.call('GET', KEYS[4]) or '0')
+if clientAttempts >= tonumber(ARGV[3]) or challengeAttempts >= tonumber(ARGV[4]) then
+  return 2
 end
 local ttl = redis.call('PTTL', KEYS[1])
-if ttl <= 0 then
-  return -1
+clientAttempts = redis.call('INCR', KEYS[3])
+challengeAttempts = redis.call('INCR', KEYS[4])
+if ttl > 0 then
+  if clientAttempts == 1 then redis.call('PEXPIRE', KEYS[3], ttl) end
+  if challengeAttempts == 1 then redis.call('PEXPIRE', KEYS[4], ttl) end
 end
-local attempts = redis.call('INCR', KEYS[2])
-if attempts == 1 then
-  redis.call('PEXPIRE', KEYS[2], ttl)
+if clientAttempts >= tonumber(ARGV[3]) or challengeAttempts >= tonumber(ARGV[4]) then
+  return 2
 end
-if attempts >= tonumber(ARGV[2]) then
-  redis.call('DEL', KEYS[1])
-  redis.call('DEL', KEYS[2])
+return 0
+`)
+	consumeLoginAttemptScript = redis.NewScript(`
+for i = 1, 2 do
+  local attempts = redis.call('INCR', KEYS[i])
+  local ttl = redis.call('PTTL', KEYS[i])
+  if attempts == 1 or ttl < 0 then
+    redis.call('PEXPIRE', KEYS[i], ARGV[i])
+  end
 end
-return attempts
+return 1
 `)
 )
 
 func InitAuth(cfg *Config) {
 	debugVerificationCode = cfg.DebugVerificationCode
+	sessionCookieSecure = cfg.AppEnv != "development" && cfg.AppEnv != "test"
 }
 
 func generateVerificationCode() (string, error) {
@@ -77,34 +180,237 @@ func generateVerificationCode() (string, error) {
 	return fmt.Sprintf("%06d", value.Int64()), nil
 }
 
-func verificationCodeResponse(code string) M {
-	response := M{"message": "verification code sent"}
+func verificationCodeResponse(challengeID, code string) M {
+	response := M{"message": "verification code sent", "challenge_id": challengeID}
 	if debugVerificationCode {
 		response["debug_code"] = code
 	}
 	return response
 }
 
-func verificationAttemptKey(email string) string {
-	return verificationAttemptsPrefix + email
+func hashedEmailKey(prefix, email string) string {
+	normalized := strings.ToLower(strings.TrimSpace(email))
+	digest := sha256.Sum256([]byte(normalized))
+	return prefix + hex.EncodeToString(digest[:])
+}
+
+func verificationCodeKey(email string) string {
+	return hashedEmailKey(codePrefix, email)
+}
+
+func verificationActiveChallengeKey(email string) string {
+	return hashedEmailKey(verificationActivePrefix, email)
+}
+
+func hashedValueKey(prefix, value string) string {
+	digest := sha256.Sum256([]byte(value))
+	return prefix + hex.EncodeToString(digest[:])
+}
+
+func verificationChallengeAttemptKey(challengeID string) string {
+	return hashedValueKey(verificationAttemptsPrefix, challengeID)
+}
+
+func verificationClientAttemptKey(challengeID, clientIdentity string) string {
+	return hashedValueKey(verificationClientAttemptsPrefix, challengeID+"\x00"+clientIdentity)
 }
 
 func verificationSendCooldownKey(email string) string {
-	return verificationSendCooldownPrefix + email
+	return hashedEmailKey(verificationSendCooldownPrefix, email)
 }
 
-func recordFailedVerificationAttempt(ctx context.Context, codeKey, attemptKey, expectedCode string) (int, error) {
-	attempts, err := recordFailedVerificationAttemptScript.Run(
+func verificationSendHourlyKey(email string) string {
+	return hashedEmailKey(verificationSendHourlyPrefix, email)
+}
+
+func verificationSendDailyKey(email string) string {
+	return hashedEmailKey(verificationSendDailyPrefix, email)
+}
+
+func verificationClientSendHourlyKey(clientIdentity string) string {
+	return hashedValueKey(verificationClientSendHourlyPrefix, clientIdentity)
+}
+
+func verificationClientSendDailyKey(clientIdentity string) string {
+	return hashedValueKey(verificationClientSendDailyPrefix, clientIdentity)
+}
+
+func loginAttemptKey(email, clientIdentity string) string {
+	normalized := strings.ToLower(strings.TrimSpace(email)) + "\x00" + clientIdentity
+	digest := sha256.Sum256([]byte(normalized))
+	return loginAttemptPrefix + hex.EncodeToString(digest[:])
+}
+
+func accountLoginAttemptKey(email string) string {
+	return hashedEmailKey(accountLoginAttemptPrefix, email)
+}
+
+func loginAttemptAllowed(attempts int64) bool {
+	return attempts > 0 && attempts <= loginAttemptLimit
+}
+
+func loadLoginAttempts(ctx context.Context, email, clientIdentity string) (int64, int64, error) {
+	values, err := rdb.MGet(ctx, loginAttemptKey(email, clientIdentity), accountLoginAttemptKey(email)).Result()
+	if err != nil {
+		return 0, 0, fmt.Errorf("load login attempts failed: %w", err)
+	}
+	clientAttempts, err := redisCounter(values[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("decode client login attempts failed: %w", err)
+	}
+	accountAttempts, err := redisCounter(values[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("decode account login attempts failed: %w", err)
+	}
+	return clientAttempts, accountAttempts, nil
+}
+
+func redisCounter(value any) (int64, error) {
+	if value == nil {
+		return 0, nil
+	}
+	switch typed := value.(type) {
+	case string:
+		return strconv.ParseInt(typed, 10, 64)
+	case []byte:
+		return strconv.ParseInt(string(typed), 10, 64)
+	case int64:
+		return typed, nil
+	default:
+		return 0, fmt.Errorf("unexpected Redis counter type %T", value)
+	}
+}
+
+func recordFailedLoginAttempt(ctx context.Context, email, clientIdentity string) (int64, int64, error) {
+	err := consumeLoginAttemptScript.Run(
 		ctx,
 		rdb,
-		[]string{codeKey, attemptKey},
-		expectedCode,
-		verificationCodeAttemptLimit,
-	).Int()
+		[]string{loginAttemptKey(email, clientIdentity), accountLoginAttemptKey(email)},
+		loginAttemptWindow.Milliseconds(),
+		accountLoginAttemptWindow.Milliseconds(),
+	).Err()
 	if err != nil {
-		return 0, fmt.Errorf("record verification attempt failed: %w", err)
+		return 0, 0, fmt.Errorf("record login attempt failed: %w", err)
 	}
-	return attempts, nil
+	return loadLoginAttempts(ctx, email, clientIdentity)
+}
+
+func loginAttemptShouldBlock(attempts int64) bool {
+	return attempts >= loginAttemptLimit
+}
+
+func accountLoginAttemptShouldBlock(attempts int64) bool {
+	return attempts >= accountLoginAttemptLimit
+}
+
+func loginPreAuthenticationShouldBlock(clientAttempts, _ int64) bool {
+	// Account-wide failures remain a risk signal, but cannot block a correct
+	// password from a clean source before the password has been verified.
+	return loginAttemptShouldBlock(clientAttempts)
+}
+
+func resetLoginAttempts(ctx context.Context, email, clientIdentity string) error {
+	if err := rdb.Del(ctx, loginAttemptKey(email, clientIdentity), accountLoginAttemptKey(email)).Err(); err != nil {
+		return fmt.Errorf("reset login attempts failed: %w", err)
+	}
+	return nil
+}
+
+func verificationAttemptAllowed(attempts int64) bool {
+	return attempts >= 0 && attempts < verificationCodeAttemptLimit
+}
+
+func verificationSendAllowed(hourly, daily int64) bool {
+	return hourly >= 0 && daily >= 0 && hourly < verificationCodeHourlySendLimit && daily < verificationCodeDailySendLimit
+}
+
+func reserveVerificationSend(ctx context.Context, email, clientIdentity string) (int64, error) {
+	result, err := reserveVerificationSendScript.Run(
+		ctx,
+		rdb,
+		[]string{
+			verificationSendCooldownKey(email),
+			verificationSendHourlyKey(email),
+			verificationSendDailyKey(email),
+			verificationClientSendHourlyKey(clientIdentity),
+			verificationClientSendDailyKey(clientIdentity),
+		},
+		verificationCodeHourlySendLimit,
+		verificationCodeDailySendLimit,
+		verificationClientHourlySendLimit,
+		verificationClientDailySendLimit,
+		verificationCodeSendCooldown.Milliseconds(),
+		time.Hour.Milliseconds(),
+		(24 * time.Hour).Milliseconds(),
+	).Int64()
+	if err != nil {
+		return 0, fmt.Errorf("reserve verification send failed: %w", err)
+	}
+	return result, nil
+}
+
+func rollbackVerificationSend(ctx context.Context, email, clientIdentity string) error {
+	return rollbackVerificationSendScript.Run(
+		ctx,
+		rdb,
+		[]string{
+			verificationSendCooldownKey(email),
+			verificationSendHourlyKey(email),
+			verificationSendDailyKey(email),
+			verificationClientSendHourlyKey(clientIdentity),
+			verificationClientSendDailyKey(clientIdentity),
+		},
+	).Err()
+}
+
+type verificationResult int
+
+const (
+	verificationExpired  verificationResult = -1
+	verificationRejected verificationResult = 0
+	verificationAccepted verificationResult = 1
+	verificationLocked   verificationResult = 2
+)
+
+func activateVerificationChallenge(ctx context.Context, email, challengeID, code string) error {
+	return activateVerificationChallengeScript.Run(
+		ctx,
+		rdb,
+		[]string{verificationCodeKey(email), verificationActiveChallengeKey(email)},
+		code,
+		challengeID,
+		codeTTL.Milliseconds(),
+	).Err()
+}
+
+func rollbackVerificationChallenge(ctx context.Context, email, challengeID string) error {
+	return rollbackVerificationChallengeScript.Run(
+		ctx,
+		rdb,
+		[]string{verificationCodeKey(email), verificationActiveChallengeKey(email)},
+		challengeID,
+	).Err()
+}
+
+func consumeVerificationCode(ctx context.Context, email, challengeID, clientIdentity, candidate string) (verificationResult, error) {
+	result, err := consumeVerificationCodeScript.Run(
+		ctx,
+		rdb,
+		[]string{
+			verificationCodeKey(email),
+			verificationActiveChallengeKey(email),
+			verificationClientAttemptKey(challengeID, clientIdentity),
+			verificationChallengeAttemptKey(challengeID),
+		},
+		challengeID,
+		candidate,
+		verificationCodeAttemptLimit,
+		verificationChallengeAttemptLimit,
+	).Int64()
+	if err != nil {
+		return verificationExpired, fmt.Errorf("consume verification code failed: %w", err)
+	}
+	return verificationResult(result), nil
 }
 
 type sendCodeRequest struct {
@@ -142,8 +448,14 @@ func normalizeUsername(raw string) (string, error) {
 }
 
 func validatePassword(password string) error {
-	if !utf8.ValidString(password) || len(password) < minPasswordBytes || len(password) > maxPasswordBytes {
-		return fmt.Errorf("password must contain 8-72 bytes")
+	if !utf8.ValidString(password) {
+		return fmt.Errorf("密碼格式不正確")
+	}
+	if utf8.RuneCountInString(password) < minPasswordRunes {
+		return fmt.Errorf("密碼至少需要 8 個字元")
+	}
+	if len(password) > maxPasswordBytes {
+		return fmt.Errorf("密碼過長，請縮短後再試")
 	}
 
 	var hasLetter, hasDigit bool
@@ -152,7 +464,7 @@ func validatePassword(password string) error {
 		hasDigit = hasDigit || unicode.IsDigit(char)
 	}
 	if !hasLetter || !hasDigit {
-		return fmt.Errorf("password must include at least one letter and one number")
+		return fmt.Errorf("密碼須包含至少一個字母與一個數字")
 	}
 
 	return nil
@@ -179,34 +491,36 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	cooldownKey := verificationSendCooldownKey(email)
-	allowed, err := rdb.SetNX(ctx, cooldownKey, "1", verificationCodeSendCooldown).Result()
+	clientIdentity := requestClientIdentity(r)
+	reservation, err := reserveVerificationSend(ctx, email, clientIdentity)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "start verification request failed"})
 		return
 	}
-	if !allowed {
+	if reservation < 0 {
 		writeJSON(w, http.StatusTooManyRequests, M{"error": "please wait before requesting another verification code"})
 		return
 	}
 
 	code, err := generateVerificationCode()
 	if err != nil {
-		rdb.Del(ctx, cooldownKey)
+		_ = rollbackVerificationSend(ctx, email, clientIdentity)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "generate verification code failed"})
 		return
 	}
 	ops := rollback.New()
+	ops.Add("release verification send reservation", func(cleanupCtx context.Context) error {
+		return rollbackVerificationSend(cleanupCtx, email, clientIdentity)
+	})
 
-	codeKey := codePrefix + email
-	attemptKey := verificationAttemptKey(email)
-	if err := storeVerificationCodeScript.Run(ctx, rdb, []string{codeKey, attemptKey}, code, codeTTL.Milliseconds()).Err(); err != nil {
-		rdb.Del(ctx, cooldownKey)
+	challengeID := uuid.NewString()
+	if err := activateVerificationChallenge(ctx, email, challengeID, code); err != nil {
+		_ = rollbackVerificationSend(ctx, email, clientIdentity)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "save verification code failed"})
 		return
 	}
-	ops.Add("delete verification state", func(cleanupCtx context.Context) error {
-		return rdb.Del(cleanupCtx, codeKey, attemptKey, cooldownKey).Err()
+	ops.Add("delete verification challenge", func(cleanupCtx context.Context) error {
+		return rollbackVerificationChallenge(cleanupCtx, email, challengeID)
 	})
 
 	if err := enqueueTask(ctx, contracts.TaskSendVerificationEmail, M{
@@ -224,14 +538,15 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, verificationCodeResponse(code))
+	writeJSON(w, http.StatusOK, verificationCodeResponse(challengeID, code))
 }
 
 type registerRequest struct {
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Code     string `json:"code"`
+	Username    string `json:"username"`
+	Email       string `json:"email"`
+	Password    string `json:"password"`
+	Code        string `json:"code"`
+	ChallengeID string `json:"challenge_id"`
 }
 
 // handleRegister 驗證 Redis 內的驗證碼，通過後把使用者寫入 user_db。
@@ -242,8 +557,8 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": "invalid request body"})
 		return
 	}
-	if req.Username == "" || req.Email == "" || req.Password == "" || req.Code == "" {
-		writeJSON(w, http.StatusBadRequest, M{"error": "username, email, password and code are required"})
+	if req.Username == "" || req.Email == "" || req.Password == "" || req.Code == "" || req.ChallengeID == "" {
+		writeJSON(w, http.StatusBadRequest, M{"error": "username, email, password, code and challenge_id are required"})
 		return
 	}
 
@@ -258,34 +573,39 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := validatePassword(req.Password); err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "密碼需為 8-72 bytes，且至少包含一個字母與一個數字"})
+		writeJSON(w, http.StatusBadRequest, M{"error": err.Error()})
 		return
 	}
 	if len(req.Code) != 6 || strings.IndexFunc(req.Code, func(char rune) bool { return !unicode.IsDigit(char) }) >= 0 {
 		writeJSON(w, http.StatusBadRequest, M{"error": "驗證碼必須為 6 位數字"})
 		return
 	}
+	if _, err := uuid.Parse(req.ChallengeID); err != nil {
+		writeJSON(w, http.StatusBadRequest, M{"error": "invalid verification challenge"})
+		return
+	}
 
 	ctx := r.Context()
 
-	codeKey := codePrefix + email
-	attemptKey := verificationAttemptKey(email)
-	storedCode, err := rdb.Get(ctx, codeKey).Result()
+	result, err := consumeVerificationCode(ctx, email, req.ChallengeID, requestClientIdentity(r), req.Code)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, M{"error": "verification code expired or not found"})
+		writeJSON(w, http.StatusServiceUnavailable, M{"error": "verification service unavailable"})
 		return
 	}
-	if storedCode != req.Code {
-		attempts, attemptErr := recordFailedVerificationAttempt(ctx, codeKey, attemptKey, storedCode)
-		if attemptErr != nil {
-			writeJSON(w, http.StatusInternalServerError, M{"error": "verify registration code failed"})
-			return
-		}
-		if attempts < 0 {
-			writeJSON(w, http.StatusBadRequest, M{"error": "verification code expired or not found"})
-			return
-		}
+	switch result {
+	case verificationExpired:
+		writeJSON(w, http.StatusBadRequest, M{"error": "verification code expired or not found"})
+		return
+	case verificationLocked:
+		writeJSON(w, http.StatusTooManyRequests, M{"error": "too many verification attempts; please try again later"})
+		return
+	case verificationRejected:
 		writeJSON(w, http.StatusBadRequest, M{"error": "invalid verification code"})
+		return
+	case verificationAccepted:
+		// Continue. The code is consumed atomically before account creation.
+	default:
+		writeJSON(w, http.StatusServiceUnavailable, M{"error": "verification service unavailable"})
 		return
 	}
 
@@ -311,7 +631,6 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rdb.Del(ctx, codeKey, attemptKey)
 	writeJSON(w, http.StatusCreated, M{"message": "registered", "user_id": userID})
 }
 
@@ -319,6 +638,30 @@ type loginRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 	Remember bool   `json:"remember"`
+}
+
+type clientUser struct {
+	ID       int    `json:"id"`
+	Username string `json:"username"`
+}
+
+func clientUserFrom(user *User) clientUser {
+	return clientUser{ID: user.ID, Username: user.Username}
+}
+
+type passwordHashComparer func(hashedPassword, password []byte) error
+
+func verifyLoginPasswordWithCompare(passwordHash, password string, compare passwordHashComparer) bool {
+	accountExists := passwordHash != ""
+	hash := dummyLoginPasswordHash
+	if accountExists {
+		hash = []byte(passwordHash)
+	}
+	return compare(hash, []byte(password)) == nil && accountExists
+}
+
+func verifyLoginPassword(passwordHash, password string) bool {
+	return verifyLoginPasswordWithCompare(passwordHash, password, bcrypt.CompareHashAndPassword)
 }
 
 // handleLogin 檢查帳密後建立 Redis session，並用 HttpOnly cookie 回傳 session id。
@@ -336,6 +679,16 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
+	clientIdentity := requestClientIdentity(r)
+	clientAttempts, accountAttempts, err := loadLoginAttempts(ctx, email, clientIdentity)
+	if err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
+		return
+	}
+	if loginPreAuthenticationShouldBlock(clientAttempts, accountAttempts) {
+		writeJSON(w, http.StatusTooManyRequests, M{"error": "too many login attempts; please try again later"})
+		return
+	}
 
 	var user User
 	var passwordHash string
@@ -344,12 +697,25 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		email,
 	).Scan(&user.ID, &user.Username, &user.Email, &passwordHash)
 	if err != nil {
+		passwordHash = ""
+	}
+
+	passwordMatches := verifyLoginPassword(passwordHash, req.Password)
+	if !passwordMatches {
+		clientAttempts, accountAttempts, attemptErr := recordFailedLoginAttempt(ctx, email, clientIdentity)
+		if attemptErr != nil {
+			writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
+			return
+		}
+		if !loginAttemptAllowed(clientAttempts) || accountAttempts > accountLoginAttemptLimit {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many login attempts; please try again later"})
+			return
+		}
 		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid email or password"})
 		return
 	}
-
-	if err := bcrypt.CompareHashAndPassword([]byte(passwordHash), []byte(req.Password)); err != nil {
-		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid email or password"})
+	if err := resetLoginAttempts(ctx, email, clientIdentity); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
 		return
 	}
 
@@ -358,43 +724,69 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 		sessionDuration = rememberSessionTTL
 	}
 
-	signed, err := CreateSessionWithTTL(ctx, &user, sessionDuration)
+	signed, err := CreateSessionWithTTL(ctx, &user, sessionDuration, req.Remember)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "create session failed"})
 		return
 	}
 
-	http.SetCookie(w, &http.Cookie{
+	http.SetCookie(w, sessionCookieForLogin(signed, sessionDuration, req.Remember))
+
+	writeJSON(w, http.StatusOK, M{"user": clientUserFrom(&user)})
+}
+
+func sessionCookieForLogin(signed string, duration time.Duration, persistent bool) *http.Cookie {
+	maxAge := 0
+	if persistent {
+		maxAge = int(duration.Seconds())
+	}
+	return &http.Cookie{
 		Name:     "session",
 		Value:    signed,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   true,
+		Secure:   sessionCookieSecure,
 		SameSite: http.SameSiteLaxMode,
-		MaxAge:   int(sessionDuration.Seconds()),
-	})
-
-	writeJSON(w, http.StatusOK, M{"user": user})
+		MaxAge:   maxAge,
+	}
 }
 
 // handleCurrentSession 回傳已驗證 session 對應的最小使用者資料，供前端恢復登入狀態。
 func handleCurrentSession(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, M{"user": currentUser(r)})
+	writeJSON(w, http.StatusOK, M{"user": clientUserFrom(currentUser(r))})
 }
 
 func handleLogout(w http.ResponseWriter, r *http.Request) {
+	handleLogoutWithDestroyer(w, r, DestroySession)
+}
+
+type sessionDestroyer func(context.Context, string) error
+
+func handleLogoutWithDestroyer(w http.ResponseWriter, r *http.Request, destroy sessionDestroyer) {
+	var destroyErr error
 	if cookie, err := r.Cookie("session"); err == nil {
-		DestroySession(r.Context(), cookie.Value)
+		destroyErr = destroy(r.Context(), cookie.Value)
 	}
 
-	http.SetCookie(w, &http.Cookie{
-		Name:   "session",
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
-	})
+	clearSessionCookie(w)
 
+	if destroyErr != nil {
+		writeJSON(w, http.StatusServiceUnavailable, M{"error": "session service unavailable"})
+		return
+	}
 	writeJSON(w, http.StatusOK, M{"message": "logged out"})
+}
+
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   sessionCookieSecure,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
 }
 
 func isUniqueViolation(err error) bool {

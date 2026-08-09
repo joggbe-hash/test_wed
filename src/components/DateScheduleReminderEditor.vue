@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useTemplateRef } from 'vue'
+import TimeSelect from './TimeSelect.vue'
 
 defineProps<{
   editorTitle: string
@@ -17,8 +18,6 @@ const startTime = defineModel<string>('startTime', { required: true })
 const endTime = defineModel<string>('endTime', { required: true })
 const dialog = useTemplateRef<HTMLElement>('dialog')
 const titleInput = useTemplateRef<HTMLInputElement>('titleInput')
-const startTimeInput = useTemplateRef<HTMLInputElement>('startTimeInput')
-const endTimeInput = useTemplateRef<HTMLInputElement>('endTimeInput')
 
 function addMinutes(time: string, amount: number) {
   const [hours = 0, minutes = 0] = time.split(':').map(Number)
@@ -26,12 +25,9 @@ function addMinutes(time: string, amount: number) {
   return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
 }
 
-function updateStartTime() {
+function updateStartTime(value: string) {
+  startTime.value = value
   if (!endTime.value || endTime.value <= startTime.value) endTime.value = addMinutes(startTime.value, 60)
-}
-
-function openPicker(input: HTMLInputElement | null) {
-  input?.showPicker?.()
 }
 
 defineExpose({ dialog, titleInput })
@@ -68,17 +64,27 @@ defineExpose({ dialog, titleInput })
       <section class="reminder-time-panel" aria-label="提醒時間">
         <span class="reminder-time-icon" aria-hidden="true"></span>
         <div class="reminder-time-card">
-          <label class="reminder-date-picker"><span>{{ dateLabel }}</span><input v-model="date" type="date" aria-label="提醒日期"></label>
-          <label class="reminder-clock-picker" @click="openPicker(startTimeInput)">
-            <strong>{{ startTime }}</strong>
-            <input ref="startTimeInput" v-model="startTime" type="time" aria-label="開始時間" @change="updateStartTime">
+          <TimeSelect
+            v-model="startTime"
+            label="開始時間"
+            variant="editor-card"
+            :subtitle="dateLabel"
+            @update:model-value="updateStartTime"
+          />
+          <label class="reminder-date-picker-overlay">
+            <input v-model="date" type="date" aria-label="提醒日期">
           </label>
         </div>
         <span class="reminder-time-arrow" aria-hidden="true">&rarr;</span>
         <div class="reminder-time-card">
-          <label class="reminder-date-picker"><span>{{ dateLabel }}</span><input v-model="date" type="date" aria-label="提醒日期"></label>
-          <label class="reminder-clock-picker" @click="openPicker(endTimeInput)">
-            <strong>{{ endTime }}</strong><input ref="endTimeInput" v-model="endTime" type="time" aria-label="結束時間">
+          <TimeSelect
+            v-model="endTime"
+            label="結束時間"
+            variant="editor-card"
+            :subtitle="dateLabel"
+          />
+          <label class="reminder-date-picker-overlay">
+            <input v-model="date" type="date" aria-label="提醒日期">
           </label>
         </div>
       </section>

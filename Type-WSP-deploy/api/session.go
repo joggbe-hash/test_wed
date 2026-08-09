@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,7 +17,11 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const sessionPrefix = "sess:"
+const (
+	sessionPrefix           = "sess:"
+	sessionRevocationPrefix = "sess:revoked:"
+	sessionGenerationPrefix = "sess:generation:"
+)
 
 var errInvalidSession = errors.New("invalid session")
 
@@ -24,6 +29,20 @@ var (
 	sessionSecret []byte
 	sessionTTL    time.Duration
 )
+
+var destroySessionScript = redis.NewScript(`
+redis.call('DEL', KEYS[1])
+redis.call('PUBLISH', KEYS[2], 'revoked')
+return 1
+`)
+
+var storeSessionScript = redis.NewScript(`
+local generation = tonumber(redis.call('GET', KEYS[2]) or '0')
+local session = cjson.decode(ARGV[1])
+session.generation = generation
+redis.call('SET', KEYS[1], cjson.encode(session), 'PX', ARGV[2])
+return generation
+`)
 
 func InitSession(cfg *Config) {
 	sessionSecret = []byte(cfg.SecretKey)
@@ -34,7 +53,15 @@ func InitSession(cfg *Config) {
 type User struct {
 	ID       int    `json:"id"`
 	Username string `json:"username"`
-	Email    string `json:"email"`
+	Email    string `json:"email,omitempty"`
+
+	sessionPersistent bool
+}
+
+type storedSession struct {
+	User       User  `json:"user"`
+	Generation int64 `json:"generation"`
+	Persistent bool  `json:"persistent,omitempty"`
 }
 
 type contextKey string
@@ -68,48 +95,164 @@ func verifySID(signed string) (string, error) {
 
 // CreateSession 只把 signed sid 放 cookie，完整 user 資料存在 Redis，方便登出與 TTL 控制。
 func CreateSession(ctx context.Context, user *User) (string, error) {
-	return CreateSessionWithTTL(ctx, user, sessionTTL)
+	return CreateSessionWithTTL(ctx, user, sessionTTL, false)
 }
 
-func CreateSessionWithTTL(ctx context.Context, user *User, ttl time.Duration) (string, error) {
+func CreateSessionWithTTL(ctx context.Context, user *User, ttl time.Duration, persistent bool) (string, error) {
 	sid := uuid.New().String()
-	data, err := json.Marshal(user)
+	data, err := marshalStoredSession(user, persistent)
 	if err != nil {
 		return "", fmt.Errorf("marshal session user failed: %w", err)
 	}
-	if err := rdb.Set(ctx, sessionPrefix+sid, data, ttl).Err(); err != nil {
+	if err := storeSessionScript.Run(
+		ctx,
+		rdb,
+		[]string{sessionPrefix + sid, sessionGenerationKey(user.ID)},
+		data,
+		ttl.Milliseconds(),
+	).Err(); err != nil {
 		return "", fmt.Errorf("save session failed: %w", err)
 	}
 	return signSID(sid), nil
 }
 
-func LoadSession(ctx context.Context, signed string) (*User, error) {
+func marshalStoredSession(user *User, persistent bool) ([]byte, error) {
+	return json.Marshal(storedSession{User: User{
+		ID:       user.ID,
+		Username: user.Username,
+	}, Persistent: persistent})
+}
+
+type sessionValueLoader func(context.Context, string) ([]byte, error)
+type sessionGenerationLoader func(context.Context, string) (int64, error)
+
+func loadSessionWithStores(
+	ctx context.Context,
+	signed string,
+	loadValue sessionValueLoader,
+	loadGeneration sessionGenerationLoader,
+) (*User, error) {
 	sid, err := verifySID(signed)
 	if err != nil {
 		return nil, err
 	}
-	data, err := rdb.Get(ctx, sessionPrefix+sid).Bytes()
+	data, err := loadValue(ctx, sessionPrefix+sid)
 	if errors.Is(err, redis.Nil) {
 		return nil, fmt.Errorf("%w: expired or not found", errInvalidSession)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load session failed: %w", err)
 	}
-	var user User
-	if err := json.Unmarshal(data, &user); err != nil {
+	var session storedSession
+	if err := json.Unmarshal(data, &session); err != nil {
 		return nil, fmt.Errorf("decode session failed: %w", err)
 	}
-	return &user, nil
+	if session.User.ID == 0 {
+		if err := json.Unmarshal(data, &session.User); err != nil || session.User.ID == 0 {
+			return nil, fmt.Errorf("%w: invalid session payload", errInvalidSession)
+		}
+	}
+
+	generation, err := loadGeneration(ctx, sessionGenerationKey(session.User.ID))
+	if err != nil {
+		return nil, fmt.Errorf("load session generation failed: %w", err)
+	}
+	if generation != session.Generation {
+		return nil, fmt.Errorf("%w: revoked user session", errInvalidSession)
+	}
+	session.User.sessionPersistent = session.Persistent
+	return &session.User, nil
+}
+
+func LoadSession(ctx context.Context, signed string) (*User, error) {
+	return loadSessionWithStores(
+		ctx,
+		signed,
+		func(ctx context.Context, key string) ([]byte, error) {
+			return rdb.Get(ctx, key).Bytes()
+		},
+		func(ctx context.Context, key string) (int64, error) {
+			generation, err := rdb.Get(ctx, key).Int64()
+			if errors.Is(err, redis.Nil) {
+				return 0, nil
+			}
+			return generation, err
+		},
+	)
+}
+
+type sessionIdleDeadlineRefresher func(context.Context, string, time.Duration) (bool, error)
+
+func refreshPersistentSessionWithStore(
+	ctx context.Context,
+	signed string,
+	user *User,
+	refresh sessionIdleDeadlineRefresher,
+) error {
+	if user == nil || !user.sessionPersistent {
+		return nil
+	}
+
+	sid, err := verifySID(signed)
+	if err != nil {
+		return err
+	}
+	refreshed, err := refresh(ctx, sessionPrefix+sid, rememberSessionTTL)
+	if err != nil {
+		return fmt.Errorf("refresh session failed: %w", err)
+	}
+	if !refreshed {
+		return fmt.Errorf("%w: expired during refresh", errInvalidSession)
+	}
+	return nil
+}
+
+func LoadSessionAndRefresh(ctx context.Context, signed string) (*User, error) {
+	user, err := LoadSession(ctx, signed)
+	if err != nil {
+		return nil, err
+	}
+	if err := refreshPersistentSessionWithStore(
+		ctx,
+		signed,
+		user,
+		func(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+			return rdb.Expire(ctx, key, ttl).Result()
+		},
+	); err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 type sessionLoader func(context.Context, string) (*User, error)
 
-func DestroySession(ctx context.Context, signed string) {
+type sessionStateDestroyer func(context.Context, string, string) error
+
+func sessionRevocationChannel(sid string) string {
+	digest := sha256.Sum256([]byte(sid))
+	return sessionRevocationPrefix + hex.EncodeToString(digest[:])
+}
+
+func sessionGenerationKey(userID int) string {
+	return sessionGenerationPrefix + strconv.Itoa(userID)
+}
+
+func destroySessionWithStore(ctx context.Context, signed string, destroy sessionStateDestroyer) error {
 	sid, err := verifySID(signed)
 	if err != nil {
-		return
+		return nil
 	}
-	rdb.Del(ctx, sessionPrefix+sid)
+	if err := destroy(ctx, sessionPrefix+sid, sessionRevocationChannel(sid)); err != nil {
+		return fmt.Errorf("destroy session failed: %w", err)
+	}
+	return nil
+}
+
+func DestroySession(ctx context.Context, signed string) error {
+	return destroySessionWithStore(ctx, signed, func(ctx context.Context, key, channel string) error {
+		return destroySessionScript.Run(ctx, rdb, []string{key, channel}).Err()
+	})
 }
 
 // requireAuthWithLoader 是需要登入的 handler middleware，驗證成功後把 User 放進 context。
@@ -133,6 +276,9 @@ func requireAuthWithLoader(next http.HandlerFunc, loadSession sessionLoader) htt
 		if user == nil {
 			writeJSON(w, http.StatusServiceUnavailable, M{"error": "session service unavailable"})
 			return
+		}
+		if user.sessionPersistent {
+			http.SetCookie(w, sessionCookieForLogin(cookie.Value, rememberSessionTTL, true))
 		}
 
 		ctx := context.WithValue(r.Context(), userCtxKey, user)

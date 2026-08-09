@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, shallowRef, watch, onMounted, onUnmounted, useTemplateRef } from 'vue'
+import { computed, shallowRef, watch, onBeforeMount, onMounted, onUnmounted, useTemplateRef } from 'vue'
 import { formatLocalDateKey } from '../utils/date'
 import { useAccessibleDialog } from '../composables/useAccessibleDialog'
 import { useInspirationStore, type InspirationItem } from '../composables/useInspirationStore'
@@ -12,7 +12,14 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const { items, errorMessage, addItem, updateItem, deleteItem: persistDeleteItem } = useInspirationStore()
+const {
+  items,
+  errorMessage,
+  loadItems,
+  addItem,
+  updateItem,
+  deleteItem: persistDeleteItem,
+} = useInspirationStore()
 const inspirationTextMaxLength = 700
 const searchText = shallowRef('')
 const draftText = shallowRef('')
@@ -174,12 +181,12 @@ function cancelDateFilter() {
   isDateFilterOpen.value = false
 }
 
-function addDraft() {
+async function addDraft() {
   const text = normalizeInspirationText(draftText.value)
   if (!text) return true
 
   const draftDate = refreshTodayDateKey()
-  if (!addItem({ date: draftDate, text })) return false
+  if (!await addItem({ date: draftDate, text })) return false
   if (draftDate < appliedStartDate.value) {
     appliedStartDate.value = draftDate
   }
@@ -194,8 +201,8 @@ function addDraft() {
   return true
 }
 
-function deleteItem(id: number) {
-  if (!persistDeleteItem(id)) return false
+async function deleteItem(id: number) {
+  if (!await persistDeleteItem(id)) return false
   if (editingItemId.value === id) {
     cancelEditItem()
   }
@@ -210,10 +217,10 @@ function cancelDeleteItem() {
   pendingDeleteItemId.value = null
 }
 
-function confirmDeleteItem() {
+async function confirmDeleteItem() {
   if (pendingDeleteItemId.value === null) return
 
-  if (deleteItem(pendingDeleteItemId.value)) {
+  if (await deleteItem(pendingDeleteItemId.value)) {
     pendingDeleteItemId.value = null
   }
 }
@@ -244,15 +251,15 @@ function cancelEditItem() {
   editText.value = ''
 }
 
-function saveEditItem() {
+async function saveEditItem() {
   const text = normalizeInspirationText(editText.value)
   if (!text || editingItemId.value === null) return
 
-  if (updateItem(editingItemId.value, text)) cancelEditItem()
+  if (await updateItem(editingItemId.value, text)) cancelEditItem()
 }
 
-function closeModal() {
-  if (!addDraft()) return
+async function closeModal() {
+  if (!await addDraft()) return
   emit('close')
 }
 
@@ -276,6 +283,12 @@ const handleKeyDown = (e: KeyboardEvent) => {
     closeModal()
   }
 }
+
+onBeforeMount(async () => {
+  if (!await loadItems()) return
+  appliedStartDate.value = earliestAvailableDate.value
+  syncPendingFilter()
+})
 
 onMounted(() => {
   window.addEventListener('keydown', handleKeyDown)

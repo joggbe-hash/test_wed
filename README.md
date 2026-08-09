@@ -12,6 +12,21 @@ npm run dev
 預設網址為 `http://localhost:5173/`。若要連接後端，可從 `.env.example` 建立
 `.env.local`，並設定 `VITE_API_BASE_URL` 與 `VITE_USE_MOCK_API=false`。
 
+### 本機串接 Go API
+
+前端 request 固定呼叫同源 `/api/*` 並攜帶 Session Cookie。開發時可在 `.env.local` 設定：
+
+```dotenv
+VITE_API_BASE_URL=
+VITE_DEV_API_TARGET=http://127.0.0.1:5000
+VITE_USE_MOCK_API=false
+```
+
+Vite 會代理 `/api` 與 WebSocket 至 `VITE_DEV_API_TARGET`。後端在 `APP_ENV=development` 或
+`APP_ENV=test` 時允許非 Secure 的本機 Session Cookie；production 一律使用 Secure Cookie。
+
+API 欄位、狀態碼與限制請以 [`API_CONTRACT.md`](./API_CONTRACT.md) 為準。
+
 ## 品質檢查
 
 ```powershell
@@ -108,7 +123,8 @@ Worker 透過 SMTP 寄送驗證碼。開發環境預設連到 Mailpit：
 
 可透過 `SMTP_HOST`、`SMTP_PORT`、`SMTP_FROM`、`SMTP_USERNAME`、
 `SMTP_PASSWORD` 與 `SMTP_SECURE` 切換 SMTP 服務。`SMTP_SECURE=true` 代表要求
-STARTTLS。驗證碼與 SMTP 密碼不會寫入 Log，收件地址只記錄遮罩版本。
+STARTTLS；production 環境禁止設為 `false`。驗證碼與 SMTP 密碼不會寫入 Log，
+收件地址只記錄遮罩版本。
 
 ## 版本控制
 

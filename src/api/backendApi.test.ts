@@ -1,5 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { createPost, fetchFeed } from './backendApi'
+import {
+  createPost,
+  fetchFeed,
+  fetchMyPosts,
+  logoutAccount,
+  registerAccount,
+  sendVerificationCode,
+} from './backendApi'
 import { setUnauthorizedHandler } from './unauthorizedHandler'
 
 describe('backendApi', () => {
@@ -17,6 +24,46 @@ describe('backendApi', () => {
     await expect(fetchFeed()).resolves.toEqual({ posts: [], next_cursor: '' })
   })
 
+  it('adds the browser-request header to every API call', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ posts: [], next_cursor: '' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchFeed()
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(new Headers(init.headers).get('X-Type-WSP-Request')).toBe('1')
+  })
+
+  it('returns the verification challenge and sends it during registration', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ message: 'verification code sent', challenge_id: 'challenge-1' }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ))
+      .mockResolvedValueOnce(new Response(
+        JSON.stringify({ message: 'registered', user_id: 1 }),
+        { status: 201, headers: { 'Content-Type': 'application/json' } },
+      ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const response = await sendVerificationCode('user@example.com')
+    expect(response.challenge_id).toBe('challenge-1')
+
+    await registerAccount({
+      username: 'user',
+      email: 'user@example.com',
+      password: 'password1',
+      code: '123456',
+      challenge_id: response.challenge_id,
+    })
+
+    const [, init] = fetchMock.mock.calls[1] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toMatchObject({ challenge_id: 'challenge-1' })
+  })
+
   it('notifies the application boundary for unauthorized requests', async () => {
     const unauthorized = vi.fn()
     setUnauthorizedHandler(unauthorized)
@@ -27,6 +74,21 @@ describe('backendApi', () => {
 
     await expect(fetchFeed()).rejects.toMatchObject({ status: 401 })
     expect(unauthorized).toHaveBeenCalledOnce()
+  })
+
+  it('loads only the current user posts from the personal endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ posts: [], next_cursor: '' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchMyPosts('next page')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/posts/me?cursor=next%20page',
+      expect.objectContaining({ credentials: 'include' }),
+    )
   })
 
   it('sends the selected visibility in JSON post requests', async () => {
@@ -55,5 +117,20 @@ describe('backendApi', () => {
     const body = init.body as FormData
     expect(body.get('content')).toBe('private image')
     expect(body.get('visibility')).toBe('private')
+  })
+
+  it('requests logout of only the current browser session', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(
+      JSON.stringify({ message: 'logged out' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    ))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await logoutAccount()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/auth/logout',
+      expect.objectContaining({ method: 'POST', credentials: 'include' }),
+    )
   })
 })

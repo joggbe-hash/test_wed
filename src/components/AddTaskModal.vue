@@ -4,8 +4,8 @@ import {
   priorityToImportance,
   type Priority,
   type TaskImportance,
-  useScheduleMock,
-} from '../composables/useScheduleMock'
+  useSchedule,
+} from '../composables/useSchedule'
 import { getLocalTodayKey } from '../utils/date'
 
 type Importance = TaskImportance
@@ -23,7 +23,7 @@ const {
   addTask,
   sortedTasks,
   updateTask,
-} = useScheduleMock()
+} = useSchedule()
 
 const form = reactive({
   title: '',

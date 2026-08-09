@@ -8,10 +8,15 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/gorilla/websocket"
 	"typewsp/shared/contracts"
 )
+
+const maxClientWebSocketMessageBytes = 1024
+
+const webSocketSessionCheckInterval = 30 * time.Second
 
 // upgrader 把 HTTP 連線升級成 WebSocket；第一版先放寬 origin，正式版應改成白名單。
 var upgrader = websocket.Upgrader{
@@ -94,20 +99,34 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	channel := contracts.NotifyUserChannel(user.ID)
-	sub := rdb.Subscribe(ctx, channel)
+	sid, err := verifySID(cookie.Value)
+	if err != nil {
+		return
+	}
+	channels := webSocketChannels(user.ID, sid)
+	revocationChannel := sessionRevocationChannel(sid)
+	sub := rdb.Subscribe(ctx, channels...)
 	defer sub.Close()
+	subscribeCtx, cancelSubscribe := context.WithTimeout(ctx, 5*time.Second)
+	_, subscribeErr := sub.Receive(subscribeCtx)
+	cancelSubscribe()
+	if subscribeErr != nil {
+		return
+	}
+	// Close the race between the initial authentication check and the active
+	// revocation subscription. A logout in that window deletes this session.
+	if _, err := LoadSession(ctx, cookie.Value); err != nil {
+		return
+	}
+	ticker := time.NewTicker(webSocketSessionCheckInterval)
+	defer ticker.Stop()
 
 	go func() {
-		for {
-			if _, _, err := conn.ReadMessage(); err != nil {
-				cancel()
-				return
-			}
-		}
+		_ = consumeWebSocketMessages(conn, nil)
+		cancel()
 	}()
 
 	ch := sub.Channel()
@@ -117,11 +136,47 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
+			if shouldCloseWebSocketForMessage(msg.Channel, revocationChannel) {
+				return
+			}
 			if err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload)); err != nil {
+				return
+			}
+		case <-ticker.C:
+			if _, err := LoadSession(ctx, cookie.Value); err != nil {
 				return
 			}
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+func webSocketChannels(userID int, sid string) []string {
+	return []string{
+		contracts.NotifyUserChannel(userID),
+		sessionRevocationChannel(sid),
+	}
+}
+
+func shouldCloseWebSocketForMessage(channel string, revocationChannels ...string) bool {
+	for _, revocationChannel := range revocationChannels {
+		if channel == revocationChannel {
+			return true
+		}
+	}
+	return false
+}
+
+func consumeWebSocketMessages(conn *websocket.Conn, onMessage func([]byte)) error {
+	conn.SetReadLimit(maxClientWebSocketMessageBytes)
+	for {
+		_, message, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		if onMessage != nil {
+			onMessage(message)
 		}
 	}
 }

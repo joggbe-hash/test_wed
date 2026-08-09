@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
-import type { TaskItem } from '../composables/useScheduleMock'
+import type { TaskItem } from '../composables/useSchedule'
 
 defineProps<{
   tasks: TaskItem[]

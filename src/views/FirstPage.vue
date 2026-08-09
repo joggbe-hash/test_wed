@@ -2,17 +2,21 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { deletePost } from '../api/backendApi'
+import { apiErrorMessage } from '../api/errors'
 import AccessibleImageViewer from '../components/AccessibleImageViewer.vue'
+import FeedLoadMoreButton from '../components/FeedLoadMoreButton.vue'
 import LoadingPanel from '../components/LoadingPanel.vue'
 import SidebarWidgets from '../components/SidebarWidgets.vue'
 import XPostCard from '../components/XPostCard.vue'
 import { openComposeModal } from '../composables/useComposeModal'
+import { useSession } from '../composables/useSession'
 import MainLayout from '../layouts/MainLayout.vue'
 import { useFeedStore } from '../stores/useFeedStore'
 
 const route = useRoute()
 const router = useRouter()
 const feedStore = useFeedStore()
+const { currentUser } = useSession()
 const isIframe = computed(() => route.query.isIframe === 'true')
 const errorMessage = ref('')
 const openPostMenuId = ref<number | null>(null)
@@ -27,7 +31,7 @@ async function loadFeed() {
     await feedStore.loadPosts()
     errorMessage.value = ''
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '無法載入貼文'
+    errorMessage.value = apiErrorMessage(error, '無法載入貼文，請稍後再試。')
   }
 }
 
@@ -37,7 +41,16 @@ async function handleDeletePost(postId: number) {
     feedStore.removePost(postId)
     openPostMenuId.value = null
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '刪除貼文失敗'
+    errorMessage.value = apiErrorMessage(error, '無法刪除貼文，請稍後再試。')
+  }
+}
+
+async function handleLoadMore() {
+  try {
+    await feedStore.loadMore()
+    errorMessage.value = ''
+  } catch {
+    errorMessage.value = '無法載入更多貼文，請稍後再試。'
   }
 }
 
@@ -69,10 +82,16 @@ onMounted(loadFeed)
         :key="`x-${post.id}`"
         :post="post"
         :is-menu-open="openPostMenuId === post.id"
+        :can-delete="post.user_id === currentUser?.id"
         @open-profile="router.push('/personal')"
         @toggle-menu="openPostMenuId = openPostMenuId === $event ? null : $event"
         @delete-post="handleDeletePost"
         @open-image="openImageViewer"
+      />
+      <FeedLoadMoreButton
+        :has-more="feedStore.hasMore"
+        :is-loading="feedStore.isLoadingMore"
+        @load-more="handleLoadMore"
       />
     </template>
 

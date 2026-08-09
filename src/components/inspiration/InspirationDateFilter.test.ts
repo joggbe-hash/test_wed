@@ -35,4 +35,34 @@ describe('InspirationDateFilter', () => {
     await wrapper.get('select[aria-label="開始月份"]').setValue('2')
     expect(wrapper.emitted('update:startMonth')?.[0]).toEqual([2])
   })
+
+  it('blocks applying when the end date is earlier than the start date', async () => {
+    const wrapper = mount(InspirationDateFilter, {
+      props: {
+        ...requiredProps,
+        startMonth: 8,
+        startDay: 8,
+        startYear: 2026,
+        endMonth: 8,
+        endDay: 1,
+        endYear: 2026,
+      },
+    })
+
+    expect(wrapper.get('[role="alert"]').text()).toBe('結束日期不得早於開始日期')
+    expect(wrapper.get('select[aria-label="結束日期"]').attributes('aria-invalid')).toBe('true')
+    expect(wrapper.get('.inspiration-apply-filter').attributes('disabled')).toBeDefined()
+
+    await wrapper.get('.inspiration-apply-filter').trigger('click')
+    expect(wrapper.emitted('apply')).toBeUndefined()
+
+    await wrapper.setProps({ endDay: 8 })
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('select[aria-label="結束日期"]').attributes('aria-invalid')).toBe('false')
+    expect(wrapper.get('.inspiration-apply-filter').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('.inspiration-apply-filter').trigger('click')
+    expect(wrapper.emitted('apply')).toHaveLength(1)
+  })
 })

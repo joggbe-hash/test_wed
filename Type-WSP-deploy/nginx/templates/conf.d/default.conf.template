@@ -40,7 +40,7 @@ server {
 
     # 所有 HTTP 請求 301 重導到 HTTPS
     location / {
-        return 301 https://${DOLLAR}host${DOLLAR}request_uri;
+        return 301 https://${DOLLAR}server_name${DOLLAR}request_uri;
     }
 }
 
@@ -63,11 +63,11 @@ server {
     # --- 安全回應標頭 ---
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
     # CSP：允許 unsafe-inline 因前端使用 onclick 行內事件
-    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss:;" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
 
     # --- 連線與上傳限制 ---
     limit_conn perip 50;           # 每 IP 最多 50 個同時連線
@@ -94,7 +94,7 @@ server {
 
         proxy_pass         http://api_backend;
         proxy_http_version 1.1;
-        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   Host              ${DOLLAR}server_name;
         proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
         proxy_set_header   X-Forwarded-For   ${DOLLAR}proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
@@ -117,7 +117,7 @@ server {
 
         proxy_pass         http://api_backend;
         proxy_http_version 1.1;
-        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   Host              ${DOLLAR}server_name;
         proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
         proxy_set_header   X-Forwarded-For   ${DOLLAR}proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
@@ -129,7 +129,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header   Upgrade           ${DOLLAR}http_upgrade;
         proxy_set_header   Connection        ${DOLLAR}connection_upgrade;
-        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   Host              ${DOLLAR}server_name;
         proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
         proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
         proxy_read_timeout 3600s;  # WebSocket 長連線，1 小時超時
@@ -144,10 +144,10 @@ server {
         try_files ${DOLLAR}uri ${DOLLAR}uri/ /index.html;
         add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
         add_header X-Content-Type-Options "nosniff" always;
-        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Frame-Options "DENY" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
-        add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss:;" always;
+        add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
         add_header Cache-Control "no-store, no-cache, must-revalidate" always;
         add_header Pragma "no-cache" always;
 
@@ -157,10 +157,10 @@ server {
             expires 30d;
             add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
             add_header X-Content-Type-Options "nosniff" always;
-            add_header X-Frame-Options "SAMEORIGIN" always;
+            add_header X-Frame-Options "DENY" always;
             add_header Referrer-Policy "strict-origin-when-cross-origin" always;
             add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
-            add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss:;" always;
+            add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' wss:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
             add_header Cache-Control "public, immutable";
             access_log off;
         }

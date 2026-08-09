@@ -28,7 +28,7 @@ server {
     }
 
     location / {
-        return 301 https://${DOLLAR}host${DOLLAR}request_uri;
+        return 301 https://${DOLLAR}server_name${DOLLAR}request_uri;
     }
 }
 
@@ -52,11 +52,11 @@ server {
     # --- 安全標頭 ---
     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
     add_header X-Content-Type-Options "nosniff" always;
-    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
     # CSP 依前端實際需求調整,這是基本款
-    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';" always;
+    add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
 
     # --- 連線限制 ---
     limit_conn perip 50;
@@ -84,7 +84,7 @@ server {
 
         proxy_pass         http://api_backend/;
         proxy_http_version 1.1;
-        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   Host              ${DOLLAR}server_name;
         proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
         proxy_set_header   X-Forwarded-For   ${DOLLAR}proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
@@ -107,7 +107,7 @@ server {
 
         proxy_pass         http://api_backend;
         proxy_http_version 1.1;
-        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   Host              ${DOLLAR}server_name;
         proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
         proxy_set_header   X-Forwarded-For   ${DOLLAR}proxy_add_x_forwarded_for;
         proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
@@ -119,7 +119,7 @@ server {
         proxy_http_version 1.1;
         proxy_set_header   Upgrade           ${DOLLAR}http_upgrade;
         proxy_set_header   Connection        "upgrade";
-        proxy_set_header   Host              ${DOLLAR}host;
+        proxy_set_header   Host              ${DOLLAR}server_name;
         proxy_set_header   X-Real-IP         ${DOLLAR}remote_addr;
         proxy_set_header   X-Forwarded-Proto ${DOLLAR}scheme;
         proxy_read_timeout 3600s;
@@ -138,10 +138,10 @@ server {
             expires 30d;
             add_header Strict-Transport-Security "max-age=63072000; includeSubDomains" always;
             add_header X-Content-Type-Options "nosniff" always;
-            add_header X-Frame-Options "SAMEORIGIN" always;
+            add_header X-Frame-Options "DENY" always;
             add_header Referrer-Policy "strict-origin-when-cross-origin" always;
             add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
-            add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self';" always;
+            add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
             add_header Cache-Control "public, immutable";
             access_log off;
         }

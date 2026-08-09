@@ -1,10 +1,9 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref, useTemplateRef } from 'vue'
+import { computed, onBeforeUnmount, onMounted, useTemplateRef } from 'vue'
 import { useRouter } from 'vue-router'
-import LoadingPanel from '../components/LoadingPanel.vue'
-import { fetchProfilePreview } from '../api/timedApi'
 import { showIntroduceModal } from '../composables/useModal'
 import { useAccessibleDialog } from '../composables/useAccessibleDialog'
+import { useSession } from '../composables/useSession'
 
 const props = defineProps({
   overlay: {
@@ -14,9 +13,9 @@ const props = defineProps({
 })
 
 const router = useRouter()
-const isLoading = ref(true)
-const loadErrorMessage = ref('')
-const profile = ref({ username: '', link: '' })
+const { currentUser } = useSession()
+const profileUsername = computed(() => currentUser.value ? `@${currentUser.value.username}` : '')
+const hasProfile = computed(() => currentUser.value !== null)
 const dialog = useTemplateRef<HTMLElement>('dialog')
 const closeButton = useTemplateRef<HTMLButtonElement>('closeButton')
 
@@ -41,19 +40,9 @@ useAccessibleDialog({
   backgroundSelector: props.overlay ? '[data-app-route-content]' : undefined,
 })
 
-onMounted(async () => {
+onMounted(() => {
   if (props.overlay) {
     document.body.style.overflow = 'hidden'
-  }
-  isLoading.value = true
-  loadErrorMessage.value = ''
-  try {
-    const response = await fetchProfilePreview()
-    profile.value = response.data
-  } catch (error) {
-    loadErrorMessage.value = error instanceof Error ? error.message : '個人資料預覽載入失敗'
-  } finally {
-    isLoading.value = false
   }
 })
 
@@ -69,10 +58,7 @@ onBeforeUnmount(() => {
 
     <div class="modal-backdrop" aria-hidden="true" @click="closePreview"></div>
 
-    <LoadingPanel v-if="isLoading" class="relative z-10 scale-150" />
-
     <section
-      v-else
       ref="dialog"
       class="profile-card"
       role="dialog"
@@ -80,8 +66,8 @@ onBeforeUnmount(() => {
       aria-labelledby="profile-preview-title"
       tabindex="-1"
     >
-      <div v-if="loadErrorMessage" class="m-6 rounded-xl border border-red-300 bg-red-50 p-5 text-red-900" role="alert">
-        <p>{{ loadErrorMessage }}</p>
+      <div v-if="!hasProfile" class="m-6 rounded-xl border border-red-300 bg-red-50 p-5 text-red-900" role="alert">
+        <p>目前沒有可顯示的登入資料。</p>
         <button ref="closeButton" type="button" class="mt-4 rounded-lg border border-red-500 px-4 py-2 font-bold" @click="closePreview">
           關閉
         </button>
@@ -97,11 +83,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div class="profile-info">
-        <h2 id="profile-preview-title" class="profile-username">{{ profile.username }}</h2>
-        <div class="profile-link">
-          <svg class="size-4 fill-current" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
-          {{ profile.link }}
-        </div>
+        <h2 id="profile-preview-title" class="profile-username">{{ profileUsername }}</h2>
 
         <div class="profile-actions">
           <button type="button" class="action-btn" aria-label="傳送訊息">

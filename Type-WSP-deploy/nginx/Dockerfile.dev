@@ -12,11 +12,9 @@ COPY src ./src
 ARG VITE_SITE_URL=
 ARG VITE_BASE_PATH=/
 ARG VITE_API_BASE_URL=
-ARG VITE_USE_MOCK_API=false
 ENV VITE_SITE_URL=$VITE_SITE_URL
 ENV VITE_BASE_PATH=$VITE_BASE_PATH
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
-ENV VITE_USE_MOCK_API=$VITE_USE_MOCK_API
 
 RUN npm run typecheck \
     && npm exec vite build -- --mode backend --outDir=/frontend-dist --emptyOutDir

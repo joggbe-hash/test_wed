@@ -1,5 +1,35 @@
 import { expect, test } from '@playwright/test'
 
+test('empty login form is rejected before calling the login API', async ({ page }) => {
+  let loginRequestCount = 0
+
+  await page.route('**/api/auth/session', (route) =>
+    route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'unauthorized' }),
+    }),
+  )
+  await page.route('**/api/auth/login', (route) => {
+    loginRequestCount += 1
+    return route.fulfill({
+      status: 400,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'missing credentials' }),
+    })
+  })
+
+  await page.goto('/#/login')
+  const loginForm = page.locator('#loginForm')
+  const emailInput = loginForm.getByLabel('信箱', { exact: true })
+  await loginForm.getByRole('button', { name: '登入', exact: true }).click()
+
+  await expect(emailInput).toBeFocused()
+  await expect(emailInput).toHaveJSProperty('validity.valueMissing', true)
+  await expect(loginForm.getByRole('alert')).toHaveCount(0)
+  expect(loginRequestCount).toBe(0)
+})
+
 test('user can log in and reach the home feed', async ({ page }) => {
   await page.route('**/api/auth/session', (route) =>
     route.fulfill({

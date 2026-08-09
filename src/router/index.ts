@@ -36,7 +36,7 @@ router.beforeEach(async (to) => {
   if (!to.meta.requiresAuth) return true
 
   try {
-    const user = await restoreCurrentSession()
+    const user = await restoreCurrentSession({ force: true })
     if (user) return true
   } catch (error) {
     console.error('Unable to verify the current session', error)

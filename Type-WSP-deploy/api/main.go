@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
 	"log"
 	"log/slog"
+	"mime"
 	"net/http"
 	"os"
 	"time"
@@ -19,11 +22,26 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 }
 
 func readJSON(r *http.Request, value any) error {
-	return json.NewDecoder(r.Body).Decode(value)
+	mediaType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mediaType != "application/json" {
+		return fmt.Errorf("Content-Type must be application/json")
+	}
+
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(value); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		if err == nil {
+			return fmt.Errorf("request body must contain one JSON value")
+		}
+		return fmt.Errorf("decode trailing request data: %w", err)
+	}
+	return nil
 }
 
 func newMux() *http.ServeMux {
-	return newMuxWithDependencies(LoadSession, checkReadiness)
+	return newMuxWithDependencies(LoadSessionAndRefresh, checkReadiness)
 }
 
 func newMuxWithSessionLoader(loadSession sessionLoader) *http.ServeMux {
@@ -37,15 +55,22 @@ func newMuxWithDependencies(loadSession sessionLoader, ready readinessChecker) *
 	// Compatibility alias for clients using the original endpoint.
 	mux.HandleFunc("GET /api/health", handleLiveness)
 
-	mux.HandleFunc("POST /api/auth/send-code", handleSendCode)
-	mux.HandleFunc("POST /api/auth/register", handleRegister)
-	mux.HandleFunc("POST /api/auth/login", handleLogin)
+	mux.HandleFunc("POST /api/auth/send-code", requireBrowserRequest(handleSendCode))
+	mux.HandleFunc("POST /api/auth/register", requireBrowserRequest(handleRegister))
+	mux.HandleFunc("POST /api/auth/login", requireBrowserRequest(handleLogin))
 	mux.HandleFunc("GET /api/auth/session", requireAuthWithLoader(handleCurrentSession, loadSession))
-	mux.HandleFunc("POST /api/auth/logout", handleLogout)
+	mux.HandleFunc("POST /api/auth/logout", requireBrowserRequest(handleLogout))
 
 	mux.HandleFunc("GET /api/feed", requireAuthWithLoader(handleFeed, loadSession))
-	mux.HandleFunc("POST /api/posts", requireAuthWithLoader(handleCreatePost, loadSession))
-	mux.HandleFunc("DELETE /api/posts/{id}", requireAuthWithLoader(handleDeletePost, loadSession))
+	mux.HandleFunc("GET /api/posts/me", requireAuthWithLoader(handlePersonalPosts, loadSession))
+	mux.HandleFunc("POST /api/posts", requireBrowserRequest(requireAuthWithLoader(handleCreatePost, loadSession)))
+	mux.HandleFunc("DELETE /api/posts/{id}", requireBrowserRequest(requireAuthWithLoader(handleDeletePost, loadSession)))
+	mux.HandleFunc("GET /api/schedule", requireAuthWithLoader(handleGetSchedule, loadSession))
+	mux.HandleFunc("PUT /api/schedule", requireBrowserRequest(requireAuthWithLoader(handlePutSchedule, loadSession)))
+	mux.HandleFunc("GET /api/inspirations", requireAuthWithLoader(handleListInspirations, loadSession))
+	mux.HandleFunc("POST /api/inspirations", requireBrowserRequest(requireAuthWithLoader(handleCreateInspiration, loadSession)))
+	mux.HandleFunc("PATCH /api/inspirations/{id}", requireBrowserRequest(requireAuthWithLoader(handleUpdateInspiration, loadSession)))
+	mux.HandleFunc("DELETE /api/inspirations/{id}", requireBrowserRequest(requireAuthWithLoader(handleDeleteInspiration, loadSession)))
 	mux.HandleFunc("GET /api/ws/", handleWebSocket)
 	mux.HandleFunc("GET /api/images/{key...}", requireAuthWithLoader(handleGetImage, loadSession))
 	return mux

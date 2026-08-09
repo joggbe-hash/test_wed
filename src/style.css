@@ -83,6 +83,10 @@
     @apply fixed bottom-4 left-1/2 z-50 w-[min(92vw,680px)] -translate-x-1/2 rounded-xl border border-red-700 bg-red-50 px-5 py-4 text-sm font-bold text-red-900 shadow-lg;
     bottom: max(1rem, env(safe-area-inset-bottom));
   }
+
+  .feed-load-more {
+    @apply mx-auto my-5 flex min-h-12 min-w-40 cursor-pointer items-center justify-center rounded-full border border-border-warm bg-white px-6 py-3 text-base font-bold text-brown shadow-sm transition-all hover:-translate-y-0.5 hover:border-accent-warm hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brown disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0;
+  }
   .app-container {
     @apply flex w-full flex-col;
   }
@@ -603,30 +607,14 @@
   }
 
   .reminder-time-card {
-    @apply flex h-[172px] flex-col items-center justify-center rounded-[20px] border border-black bg-white px-5 text-center max-md:h-[132px];
+    @apply relative h-[172px] min-w-0 max-md:h-[132px];
   }
 
-  .reminder-date-picker,
-  .reminder-clock-picker {
-    @apply relative block cursor-pointer;
+  .reminder-date-picker-overlay {
+    @apply absolute left-1/2 top-4 z-10 h-10 w-[78%] -translate-x-1/2 cursor-pointer max-md:top-3 max-md:h-8;
   }
 
-  .reminder-date-picker span {
-    @apply block whitespace-nowrap text-[26px] font-black leading-none text-black max-md:text-xl;
-  }
-
-  .reminder-clock-picker strong {
-    @apply mt-7 inline-flex min-w-[120px] justify-center whitespace-nowrap rounded-full px-4 py-2 text-[32px] font-black leading-none text-black transition-colors max-md:mt-5 max-md:min-w-[96px] max-md:text-2xl;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .reminder-clock-picker:hover strong,
-  .reminder-clock-picker:focus-within strong {
-    @apply bg-[#eeeef8];
-  }
-
-  .reminder-date-picker input,
-  .reminder-clock-picker input {
+  .reminder-date-picker-overlay input {
     @apply absolute inset-0 size-full cursor-pointer opacity-0;
   }
 
@@ -986,7 +974,7 @@
   }
 
   .reminder-create-panel {
-    @apply relative grid-cols-[minmax(320px,1fr)_minmax(180px,220px)_minmax(160px,200px)] gap-x-4 gap-y-4 overflow-hidden rounded-lg px-6 py-6 max-xl:grid-cols-2 max-md:grid-cols-1 max-md:px-4;
+    @apply relative grid-cols-[minmax(320px,1fr)_minmax(180px,220px)_minmax(160px,200px)] gap-x-4 gap-y-4 overflow-visible rounded-lg px-6 py-6 max-xl:grid-cols-2 max-md:grid-cols-1 max-md:px-4;
   }
 
   .reminder-create-panel::before {
@@ -1326,6 +1314,10 @@
     @apply mt-3 flex h-[220px] items-center justify-center rounded-[16px] border border-[#cfd9de] bg-[#eff3f4] text-sm font-bold text-[#536471];
   }
 
+  .x-media-failed {
+    @apply border-red-300 bg-red-50 text-red-800;
+  }
+
   .compose-media-grid {
     @apply mb-3 grid w-full max-w-[640px] gap-1 overflow-hidden rounded-[16px];
     min-height: 140px;
@@ -1627,6 +1619,14 @@
     @apply h-9 cursor-pointer rounded-[3px] border border-[#4d4d4d] bg-white px-2 text-[22px] font-normal leading-none text-black outline-none focus:border-black max-md:text-lg;
   }
 
+  .inspiration-date-selects select[aria-invalid='true'] {
+    @apply border-2 border-black;
+  }
+
+  .inspiration-date-error {
+    @apply -mt-4 mb-5 text-center text-sm font-bold leading-tight text-black underline decoration-1 underline-offset-2;
+  }
+
   .inspiration-sort-options {
     @apply flex gap-8 max-md:gap-3;
   }
@@ -1649,6 +1649,10 @@
 
   .inspiration-apply-filter {
     @apply bg-text-faint text-white hover:bg-text-muted;
+  }
+
+  .inspiration-apply-filter:disabled {
+    @apply cursor-not-allowed bg-[#b0b0b0] text-white opacity-60 hover:bg-[#b0b0b0];
   }
 
   .inspiration-cancel-filter {
@@ -1966,7 +1970,11 @@
   }
 
   .daily-task-time-panel {
-    @apply grid min-h-[108px] grid-cols-[150px_minmax(220px,262px)_120px_minmax(220px,262px)] items-center justify-center rounded-[10px] border-2 border-dotted border-text-default px-6 py-4 text-black max-lg:grid-cols-[90px_minmax(190px,1fr)_72px_minmax(190px,1fr)] max-md:grid-cols-1 max-md:gap-4;
+    @apply relative grid min-h-[108px] grid-cols-[150px_minmax(220px,262px)_120px_minmax(220px,262px)] items-center justify-center rounded-[10px] border-2 border-dotted border-text-default px-6 py-4 text-black max-lg:grid-cols-[90px_minmax(190px,1fr)_72px_minmax(190px,1fr)] max-md:grid-cols-1 max-md:gap-4;
+  }
+
+  .daily-task-time-error {
+    @apply pointer-events-none absolute inset-x-0 -bottom-5 m-0 text-center text-base font-black leading-5 text-black underline decoration-2 underline-offset-4;
   }
 
   .daily-task-time-icon {

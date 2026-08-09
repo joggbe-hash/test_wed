@@ -4,9 +4,9 @@ import MainLayout from '../layouts/MainLayout.vue'
 import SidebarWidgets from '../components/SidebarWidgets.vue'
 import DateSelect from '../components/DateSelect.vue'
 import TimeSelect from '../components/TimeSelect.vue'
-import { priorityMeta, type Priority, useScheduleMock } from '../composables/useScheduleMock'
+import { priorityMeta, type Priority, useSchedule } from '../composables/useSchedule'
 
-const { todayKey, todayTasks, addTask, toggleTask, reorderTaskWithinPriority } = useScheduleMock()
+const { todayKey, todayTasks, addTask, toggleTask, reorderTaskWithinPriority } = useSchedule()
 const draggingTaskId = ref<number | null>(null)
 const blockedDropId = ref<number | null>(null)
 let blockedDropTimer: number | undefined

@@ -1,9 +1,15 @@
 <script setup lang="ts">
-import { onBeforeUnmount, ref, useTemplateRef, watch } from 'vue'
-import { createPost, fetchFeed } from '../api/backendApi'
+import { onBeforeUnmount, ref, shallowRef, useTemplateRef, watch } from 'vue'
+import { createPost } from '../api/backendApi'
+import { apiErrorMessage } from '../api/errors'
 import { useAccessibleDialog } from '../composables/useAccessibleDialog'
 import { closeComposeModal } from '../composables/useComposeModal'
 import { useFeedStore } from '../stores/useFeedStore'
+import {
+  acceptedPostImageInput,
+  maxPostImages,
+  validatePostImages,
+} from '../utils/postImages'
 
 interface ImagePreview {
   name: string
@@ -11,13 +17,13 @@ interface ImagePreview {
 }
 
 const feedStore = useFeedStore()
-const content = ref('')
-const imageInput = ref<HTMLInputElement | null>(null)
+const content = shallowRef('')
+const imageInput = useTemplateRef<HTMLInputElement>('imageInput')
 const selectedImages = ref<File[]>([])
 const imagePreviews = ref<ImagePreview[]>([])
-const isSubmitting = ref(false)
-const errorMessage = ref('')
-const visibility = ref<'public' | 'private'>('public')
+const isSubmitting = shallowRef(false)
+const errorMessage = shallowRef('')
+const visibility = shallowRef<'public' | 'private'>('public')
 const dialog = useTemplateRef<HTMLElement>('dialog')
 const cancelButton = useTemplateRef<HTMLButtonElement>('cancelButton')
 
@@ -28,7 +34,7 @@ function revokeImagePreviews() {
 
 watch(selectedImages, (images) => {
   revokeImagePreviews()
-  imagePreviews.value = images.slice(0, 4).map((image) => ({
+  imagePreviews.value = images.slice(0, maxPostImages).map((image) => ({
     name: image.name,
     url: URL.createObjectURL(image),
   }))
@@ -40,7 +46,10 @@ function openImagePicker() {
 
 function handleImageChange(event: Event) {
   const input = event.target as HTMLInputElement
-  selectedImages.value = Array.from(input.files ?? []).slice(0, 4)
+  const validation = validatePostImages(input.files ?? [])
+  errorMessage.value = validation.errorMessage
+  selectedImages.value = validation.accepted
+  if (validation.errorMessage) input.value = ''
 }
 
 function removeSelectedImage(imageIndex: number) {
@@ -72,23 +81,14 @@ async function submitPost() {
   errorMessage.value = ''
 
   try {
-    const imagesToUpload = selectedImages.value.slice(0, 4)
-    const result = await createPost(trimmedContent, imagesToUpload, visibility.value)
-
-    if (imagesToUpload.length > 0) {
-      let isProcessed = false
-      let attempts = 0
-
-      while (!isProcessed && attempts < 20) {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-        const response = await fetchFeed()
-        const newPost = response.posts.find((post) => post.id === result.post_id)
-        if (!newPost || newPost.image_status !== 'processing') {
-          isProcessed = true
-        }
-        attempts += 1
-      }
+    const validation = validatePostImages(selectedImages.value)
+    if (validation.errorMessage) {
+      errorMessage.value = validation.errorMessage
+      return
     }
+
+    const imagesToUpload = validation.accepted
+    const result = await createPost(trimmedContent, imagesToUpload, visibility.value)
 
     content.value = ''
     selectedImages.value = []
@@ -97,9 +97,10 @@ async function submitPost() {
       imageInput.value.value = ''
     }
     await feedStore.loadPosts(true)
+    if (imagesToUpload.length > 0) void feedStore.trackPostProcessing(result.post_id)
     closeComposeModal()
   } catch (error) {
-    errorMessage.value = error instanceof Error ? error.message : '發文失敗'
+    errorMessage.value = apiErrorMessage(error, '無法建立貼文，請稍後再試。')
   } finally {
     isSubmitting.value = false
   }
@@ -203,7 +204,7 @@ onBeforeUnmount(() => {
               ref="imageInput"
               type="file"
               class="sr-only"
-              accept="image/*"
+              :accept="acceptedPostImageInput"
               multiple
               aria-label="選擇最多四張貼文圖片"
               @change="handleImageChange"

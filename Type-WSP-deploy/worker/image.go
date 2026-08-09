@@ -27,7 +27,11 @@ const maxDimension = 4096
 const jpegQuality = 95
 const maxRawImageBytes = 8 << 20
 const maxImagePixels = 20_000_000
+const maxImageWorkingBytes = 192 << 20
+const maxDecodedSourceBytesPerPixel = 8
 const imageProcessingLease = 10 * time.Minute
+
+var errProcessedImageTooLarge = errors.New("processed image exceeds size limit")
 
 type processedImage struct {
 	data        []byte
@@ -65,6 +69,7 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) (resultErr 
 
 	ops := rollback.New()
 	var processedKeys []string
+	var processedImages []*processedImage
 
 	for _, rawKey := range payload.RawKeys {
 		if !isRawImageKey(rawKey) {
@@ -94,6 +99,7 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) (resultErr 
 		}
 
 		processedKeys = append(processedKeys, processedKey)
+		processedImages = append(processedImages, processed)
 		capturedKey := processedKey
 		ops.Add("remove processed object "+processedKey, func(cleanupCtx context.Context) error {
 			return minioClient.RemoveObject(cleanupCtx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
@@ -101,16 +107,19 @@ func processImagePost(ctx context.Context, payload ImagePostPayload) (resultErr 
 	}
 
 	processedJSON, _ := json.Marshal(processedKeys)
+	storedBytes := processedImageBytes(processedImages)
 	tag, err := systemPool.Exec(ctx,
 		`UPDATE posts
 		 SET image_url = $1,
+		     image_storage_bytes = $2,
+		     image_reserved_bytes = 0,
 		     image_status = 'ready',
 		     processing_token = NULL,
 		     processing_started_at = NULL
-		 WHERE id = $2
+		 WHERE id = $3
 		   AND image_status = 'processing'
-		   AND processing_token = $3`,
-		string(processedJSON), payload.PostID, processingToken,
+		   AND processing_token = $4`,
+		string(processedJSON), storedBytes, payload.PostID, processingToken,
 	)
 	if err != nil {
 		return rollbackImageAttempt(ctx, ops, fmt.Errorf("update post image state failed: %w", err))
@@ -193,6 +202,8 @@ func markPostFailed(ctx context.Context, postID int) error {
 	_, err := systemPool.Exec(ctx,
 		`UPDATE posts
 		 SET image_status = 'failed',
+		     image_reserved_bytes = 0,
+		     image_storage_bytes = 0,
 		     processing_token = NULL,
 		     processing_started_at = NULL
 		 WHERE id = $1
@@ -200,6 +211,16 @@ func markPostFailed(ctx context.Context, postID int) error {
 		postID,
 	)
 	return err
+}
+
+func finalizeFailedImagePost(ctx context.Context, payload ImagePostPayload) error {
+	if err := deleteImages(ctx, ImageDeletePayload{Keys: payload.RawKeys}); err != nil {
+		return fmt.Errorf("remove raw images after terminal failure: %w", err)
+	}
+	if err := markPostFailed(ctx, payload.PostID); err != nil {
+		return fmt.Errorf("mark image post failed: %w", err)
+	}
+	return nil
 }
 
 func isRawImageKey(key string) bool {
@@ -272,39 +293,35 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 	if config.Width <= 0 || config.Height <= 0 {
 		return nil, fmt.Errorf("invalid image dimensions")
 	}
-	if int64(config.Width)*int64(config.Height) > maxImagePixels {
+	if int64(config.Width) > maxImagePixels/int64(config.Height) {
 		return nil, fmt.Errorf("image dimensions exceed %d pixels", maxImagePixels)
+	}
+
+	orientation := imageOrientation(data)
+	newW, newH := resizedDimensions(config.Width, config.Height)
+	workingBytes := estimatedImageWorkingBytes(config.Width, config.Height, newW, newH, orientation) + int64(len(data))
+	if workingBytes > maxImageWorkingBytes {
+		return nil, fmt.Errorf("image working set %d exceeds %d bytes", workingBytes, maxImageWorkingBytes)
 	}
 
 	src, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("decode image failed, format=%s: %w", format, err)
 	}
-	orientation := imageOrientation(data)
-	src = applyOrientation(src, orientation)
-
-	bounds := src.Bounds()
-	origW := bounds.Dx()
-	origH := bounds.Dy()
 	contentType, extension := imageOutputInfo(format)
 
-	newW, newH := origW, origH
-	if origW > maxDimension || origH > maxDimension {
-		if origW >= origH {
-			newW = maxDimension
-			newH = origH * maxDimension / origW
-		} else {
-			newH = maxDimension
-			newW = origW * maxDimension / origH
-		}
+	output := src
+	bounds := src.Bounds()
+	if bounds.Dx() != newW || bounds.Dy() != newH {
+		dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
+		draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
+		output = dst
 	}
+	output = applyOrientation(output, orientation)
 
-	dst := image.NewRGBA(image.Rect(0, 0, newW, newH))
-	draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
-
-	var buf bytes.Buffer
+	buf := &limitedImageBuffer{limit: contracts.MaxProcessedImageBytes}
 	if format == "png" {
-		if err := png.Encode(&buf, dst); err != nil {
+		if err := png.Encode(buf, output); err != nil {
 			return nil, fmt.Errorf("encode PNG failed: %w", err)
 		}
 		return &processedImage{
@@ -314,7 +331,7 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 		}, nil
 	}
 
-	if err := jpeg.Encode(&buf, dst, &jpeg.Options{Quality: jpegQuality}); err != nil {
+	if err := jpeg.Encode(buf, output, &jpeg.Options{Quality: jpegQuality}); err != nil {
 		return nil, fmt.Errorf("encode JPEG failed: %w", err)
 	}
 
@@ -323,6 +340,53 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 		contentType: contentType,
 		extension:   extension,
 	}, nil
+}
+
+func resizedDimensions(width, height int) (int, int) {
+	if width <= maxDimension && height <= maxDimension {
+		return width, height
+	}
+	if width >= height {
+		return maxDimension, max(1, height*maxDimension/width)
+	}
+	return max(1, width*maxDimension/height), maxDimension
+}
+
+func estimatedImageWorkingBytes(width, height, resizedWidth, resizedHeight, orientation int) int64 {
+	// PNG may decode to an 8-byte-per-pixel NRGBA64 image. Use that as the
+	// conservative source cost even when JPEG and 8-bit PNG use less memory.
+	sourceBytes := int64(width) * int64(height) * maxDecodedSourceBytesPerPixel
+	resizedBytes := int64(resizedWidth) * int64(resizedHeight) * 4
+	total := sourceBytes + contracts.MaxProcessedImageBytes
+	if resizedWidth != width || resizedHeight != height {
+		total += resizedBytes
+	}
+	if orientation != 1 {
+		total += resizedBytes
+	}
+	return total
+}
+
+func processedImageBytes(images []*processedImage) int64 {
+	var total int64
+	for _, image := range images {
+		if image != nil {
+			total += int64(len(image.data))
+		}
+	}
+	return total
+}
+
+type limitedImageBuffer struct {
+	bytes.Buffer
+	limit int
+}
+
+func (buffer *limitedImageBuffer) Write(data []byte) (int, error) {
+	if len(data) > buffer.limit-buffer.Len() {
+		return 0, errProcessedImageTooLarge
+	}
+	return buffer.Buffer.Write(data)
 }
 
 func imageOutputInfo(format string) (string, string) {

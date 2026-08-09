@@ -8,9 +8,10 @@ import {
   priorityToImportance,
   type Priority,
   type TaskImportance,
-  useScheduleMock,
-} from '../composables/useScheduleMock'
+  useSchedule,
+} from '../composables/useSchedule'
 import DailyTaskListView from './schedule/DailyTaskListView.vue'
+import TimeSelect from './TimeSelect.vue'
 
 type Importance = TaskImportance
 type ImportanceSelection = TaskImportance
@@ -28,7 +29,7 @@ const emit = defineEmits<{
   close: []
 }>()
 const mode = shallowRef<PromptMode>('form')
-const { addTask, sortedTasks, todayKey, updateTask } = useScheduleMock()
+const { addTask, sortedTasks, todayKey, updateTask } = useSchedule()
 
 const form = reactive({
   title: '',
@@ -40,13 +41,13 @@ const form = reactive({
 const hoverImportance = shallowRef<Importance | null>(null)
 const dialogPanel = useTemplateRef<HTMLElement>('dailyTaskDialog')
 const titleInput = useTemplateRef<HTMLInputElement>('dailyTitleInput')
-const startTimeInput = useTemplateRef<HTMLInputElement>('dailyStartTimeInput')
-const endTimeInput = useTemplateRef<HTMLInputElement>('dailyEndTimeInput')
 let previousActiveElement = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement
   ? document.activeElement
   : null
 
-const canSubmit = computed(() => form.title.trim().length > 0)
+const isTimeRangeValid = computed(() => form.endTime > form.startTime)
+const timeRangeError = computed(() => isTimeRangeValid.value ? '' : '結束時間必須晚於開始時間')
+const canSubmit = computed(() => form.title.trim().length > 0 && isTimeRangeValid.value)
 const displayedImportance = computed(() => hoverImportance.value ?? form.importance)
 const isEditMode = computed(() => props.editTaskId !== undefined && props.editTaskId !== null)
 const isScheduleTaskEditor = computed(() => Boolean(props.taskDate) || isEditMode.value)
@@ -148,33 +149,11 @@ function defaultTaskEndTime(startTime: string) {
   return addMinutesToTime(startTime || '08:00', 60)
 }
 
-function updateTaskStartTime(event: Event) {
-  const input = event.target
-  if (!(input instanceof HTMLInputElement)) return
-
-  form.startTime = input.value
-  if (!form.endTime || form.endTime <= input.value) {
-    form.endTime = defaultTaskEndTime(input.value)
+function updateTaskStartTime(startTime: string) {
+  form.startTime = startTime
+  if (!form.endTime || form.endTime <= startTime) {
+    form.endTime = defaultTaskEndTime(startTime)
   }
-}
-
-function openTimePicker(input: HTMLInputElement | null) {
-  if (!input) return
-
-  input.focus()
-  try {
-    input.showPicker?.()
-  } catch {
-    // Native time pickers require direct user activation in some browsers.
-  }
-}
-
-function openStartTimePicker() {
-  openTimePicker(startTimeInput.value)
-}
-
-function openEndTimePicker() {
-  openTimePicker(endTimeInput.value)
 }
 
 function closePrompt() {
@@ -188,7 +167,7 @@ function closePrompt() {
 
 function submitTask() {
   const title = form.title.trim()
-  if (!title) return
+  if (!title || !isTimeRangeValid.value) return
 
   if (isEditMode.value) {
     const task = editingTask.value
@@ -235,7 +214,7 @@ function addTaskFromForm(title: string) {
 
 function saveTaskAndCreateNext() {
   const title = form.title.trim()
-  if (!title || isEditMode.value) return
+  if (!title || !isTimeRangeValid.value || isEditMode.value) return
 
   if (!addTaskFromForm(title)) return
   resetForm()
@@ -376,25 +355,33 @@ onUnmounted(() => {
           <section class="daily-task-time-panel daily-task-editor-time-panel" aria-label="任務時間">
             <span class="daily-task-time-icon" aria-hidden="true"></span>
 
-            <label class="daily-task-time-pill daily-task-editor-time-card" @click="openStartTimePicker">
-              <span class="daily-task-editor-date-label">{{ taskEditorDateLabel }}</span>
-              <strong>{{ form.startTime }}</strong>
-              <input
-                ref="dailyStartTimeInput"
-                v-model="form.startTime"
-                type="time"
-                aria-label="開始時間"
-                @change="updateTaskStartTime"
-              >
-            </label>
+            <TimeSelect
+              v-model="form.startTime"
+              class="daily-task-time-select"
+              label="開始時間"
+              variant="editor-card"
+              :subtitle="taskEditorDateLabel"
+              @update:model-value="updateTaskStartTime"
+            />
 
             <span class="daily-task-time-arrow" aria-hidden="true">&rarr;</span>
 
-            <label class="daily-task-time-pill daily-task-editor-time-card" @click="openEndTimePicker">
-              <span class="daily-task-editor-date-label">{{ taskEditorDateLabel }}</span>
-              <strong>{{ form.endTime }}</strong>
-              <input ref="dailyEndTimeInput" v-model="form.endTime" type="time" aria-label="結束時間">
-            </label>
+            <TimeSelect
+              v-model="form.endTime"
+              class="daily-task-time-select"
+              label="結束時間"
+              variant="editor-card"
+              :subtitle="taskEditorDateLabel"
+              :invalid="!isTimeRangeValid"
+              :described-by="!isTimeRangeValid ? 'daily-task-time-error' : undefined"
+            />
+
+            <p
+              v-if="!isTimeRangeValid"
+              id="daily-task-time-error"
+              class="daily-task-time-error"
+              role="alert"
+            >{{ timeRangeError }}</p>
           </section>
 
           <div class="daily-task-editor-actions">
@@ -433,23 +420,31 @@ onUnmounted(() => {
         <section class="daily-task-time-panel" aria-label="任務時間">
           <span class="daily-task-time-icon" aria-hidden="true"></span>
 
-          <label class="daily-task-time-pill" @click="openStartTimePicker">
-            <strong>{{ form.startTime }}</strong>
-            <input
-              ref="dailyStartTimeInput"
-              v-model="form.startTime"
-              type="time"
-              aria-label="開始時間"
-              @change="updateTaskStartTime"
-            >
-          </label>
+          <TimeSelect
+            v-model="form.startTime"
+            class="daily-task-time-select"
+            label="開始時間"
+            variant="pill"
+            @update:model-value="updateTaskStartTime"
+          />
 
           <span class="daily-task-time-arrow" aria-hidden="true">&rarr;</span>
 
-          <label class="daily-task-time-pill" @click="openEndTimePicker">
-            <strong>{{ form.endTime }}</strong>
-            <input ref="dailyEndTimeInput" v-model="form.endTime" type="time" aria-label="結束時間">
-          </label>
+          <TimeSelect
+            v-model="form.endTime"
+            class="daily-task-time-select"
+            label="結束時間"
+            variant="pill"
+            :invalid="!isTimeRangeValid"
+            :described-by="!isTimeRangeValid ? 'daily-task-time-error' : undefined"
+          />
+
+          <p
+            v-if="!isTimeRangeValid"
+            id="daily-task-time-error"
+            class="daily-task-time-error"
+            role="alert"
+          >{{ timeRangeError }}</p>
         </section>
 
         <div class="daily-task-footer">
@@ -492,6 +487,7 @@ onUnmounted(() => {
       <button v-if="mode === 'form' && !isEditMode" type="button" class="daily-task-skip" @click="closePrompt">
         跳過
       </button>
+
       </template>
     </section>
   </div>

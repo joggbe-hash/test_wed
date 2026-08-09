@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { CSSProperties } from 'vue'
-import type { ReminderItem } from '../composables/useScheduleMock'
+import type { ReminderItem } from '../composables/useSchedule'
 
 defineProps<{
   reminders: ReminderItem[]

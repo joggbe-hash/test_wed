@@ -33,6 +33,7 @@ const {
   confirmPasswordToggleLabel,
   showRegisterPasswordMismatch,
   showRegisterPasswordStrengthError,
+  registerPasswordErrorMessage,
   canRegister,
   handleLogin,
   handleSendCode,
@@ -69,6 +70,7 @@ const {
             placeholder="example@email.com"
             autocomplete="email"
             spellcheck="false"
+            required
           >
         </div>
 
@@ -82,6 +84,7 @@ const {
             placeholder="請輸入密碼"
             autocomplete="current-password"
             name="password"
+            required
           >
           <button
             v-if="hasLoginPassword"
@@ -108,7 +111,7 @@ const {
         <div class="login-options">
           <label class="remember-me">
             <input v-model="rememberMe" type="checkbox" autocomplete="off">
-            <span>記住我</span>
+            <span>記住我（30 天未使用將自動登出）</span>
           </label>
 
           <div class="forgot-password">
@@ -248,7 +251,7 @@ const {
           id="register-password-strength-feedback"
           class="mb-4 w-full max-w-[650px] text-right text-sm font-bold text-red-600"
         >
-          密碼需為 8-72 bytes，且至少包含一個字母與一個數字
+          {{ registerPasswordErrorMessage }}
         </p>
         <div class="reg-group">
           <label class="reg-label" for="confirm-password">確認密碼</label>

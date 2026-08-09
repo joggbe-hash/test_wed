@@ -3,8 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, shallowRef
 import {
   type ReminderItem,
   type TaskItem,
-  useScheduleMock,
-} from '../composables/useScheduleMock'
+  useSchedule,
+} from '../composables/useSchedule'
 import {
   focusWithoutScroll,
   isUsableFocusTarget,
@@ -26,7 +26,7 @@ const emit = defineEmits<{
   close: []
   'update:dateKey': [value: string]
 }>()
-const { deleteTask, deleteReminder } = useScheduleMock()
+const { deleteTask, deleteReminder } = useSchedule()
 
 type PendingDelete =
   | { kind: 'task'; item: TaskItem }

@@ -6,8 +6,15 @@ import {
   registerAccount,
   sendVerificationCode,
 } from '../../api/backendApi'
+import {
+  apiErrorMessage,
+  loginErrorMessage,
+  registrationErrorMessage,
+  verificationSendErrorMessage,
+} from '../../api/errors'
 import { useSession } from '../../composables/useSession'
 import { publicAsset } from '../../utils/assets'
+import { registrationPasswordError } from './passwordValidation'
 
 export function useAuthPage() {
   const router = useRouter()
@@ -25,6 +32,8 @@ export function useAuthPage() {
   const registerPassword = shallowRef('')
   const username = shallowRef('')
   const code = shallowRef('')
+  const verificationChallengeId = shallowRef('')
+  const verificationChallengeEmail = shallowRef('')
   const confirmPassword = shallowRef('')
   const isSubmitting = shallowRef(false)
   const statusMessage = shallowRef('')
@@ -43,6 +52,7 @@ export function useAuthPage() {
   }
 
   const trimmedEmail = computed(() => email.value.trim())
+  const normalizedEmail = computed(() => trimmedEmail.value.toLowerCase())
   const trimmedUsername = computed(() => username.value.trim())
   const trimmedCode = computed(() => code.value.trim())
   const isRegisterEmailValid = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail.value))
@@ -71,16 +81,13 @@ export function useAuthPage() {
   const showRegisterPasswordMismatch = computed(() =>
     confirmPassword.value.length > 0 && registerPassword.value !== confirmPassword.value,
   )
-  const registerPasswordByteLength = computed(() => new TextEncoder().encode(registerPassword.value).length)
-  const isRegisterPasswordStrong = computed(() =>
-    registerPasswordByteLength.value >= 8 &&
-    registerPasswordByteLength.value <= 72 &&
-    /\p{L}/u.test(registerPassword.value) &&
-    /\p{N}/u.test(registerPassword.value),
-  )
+  const registerPasswordErrorMessage = computed(() => registrationPasswordError(registerPassword.value))
+  const isRegisterPasswordStrong = computed(() => registerPasswordErrorMessage.value === '')
   const showRegisterPasswordStrengthError = computed(() => hasRegisterPassword.value && !isRegisterPasswordStrong.value)
   const canRegister = computed(() =>
     isRegisterEmailValid.value &&
+    verificationChallengeId.value.length > 0 &&
+    verificationChallengeEmail.value === normalizedEmail.value &&
     /^\d{6}$/.test(trimmedCode.value) &&
     isRegisterUsernameValid.value &&
     isRegisterPasswordStrong.value &&
@@ -96,6 +103,13 @@ export function useAuthPage() {
   watch(confirmPassword, (value) => {
     if (value.length === 0) showConfirmPassword.value = false
   })
+  watch(normalizedEmail, (value) => {
+    if (verificationChallengeEmail.value && value !== verificationChallengeEmail.value) {
+      verificationChallengeId.value = ''
+      verificationChallengeEmail.value = ''
+      code.value = ''
+    }
+  })
 
   function setStatus(message: string) {
     statusMessage.value = message
@@ -108,7 +122,7 @@ export function useAuthPage() {
   }
 
   function setError(error: unknown) {
-    setFormError(error instanceof Error ? error.message : '操作失敗')
+    setFormError(apiErrorMessage(error, '驗證失敗，請稍後再試。'))
   }
 
   function redirectAfterLogin() {
@@ -119,13 +133,16 @@ export function useAuthPage() {
   }
 
   async function handleLogin() {
+    if (!trimmedEmail.value) return setFormError('請輸入電子信箱')
+    if (!loginPassword.value) return setFormError('請輸入密碼')
+
     isSubmitting.value = true
     try {
       const { user } = await loginAccount(trimmedEmail.value, loginPassword.value, rememberMe.value)
       setCurrentSession(user)
       await router.replace(redirectAfterLogin())
     } catch (error) {
-      setError(error)
+      setFormError(loginErrorMessage(error))
     } finally {
       isSubmitting.value = false
     }
@@ -137,19 +154,25 @@ export function useAuthPage() {
     isSubmitting.value = true
     try {
       const response = await sendVerificationCode(trimmedEmail.value)
-      setStatus(response.message)
+      verificationChallengeId.value = response.challenge_id
+      verificationChallengeEmail.value = normalizedEmail.value
+      code.value = ''
+      setStatus('驗證碼已送出，請查看最新一封信。')
     } catch (error) {
-      setError(error)
+      setFormError(verificationSendErrorMessage(error))
     } finally {
       isSubmitting.value = false
     }
   }
 
   async function handleRegister() {
+    if (isRegisterEmailValid.value && (!verificationChallengeId.value || verificationChallengeEmail.value !== normalizedEmail.value)) {
+      return setFormError('請先取得這個電子信箱的驗證碼')
+    }
     if (!isRegisterEmailValid.value) return setFormError('請輸入正確的電子信箱')
     if (!trimmedCode.value) return setFormError('請輸入驗證碼')
     if (!isRegisterUsernameValid.value) return setFormError('使用者名稱需為 2-20 個字，且不能有空白')
-    if (!isRegisterPasswordStrong.value) return setFormError('密碼需為 8-72 bytes，且至少包含一個字母與一個數字')
+    if (!isRegisterPasswordStrong.value) return setFormError(registerPasswordErrorMessage.value)
     if (!isRegisterPasswordMatched.value) return setFormError('兩次密碼不一致')
     isSubmitting.value = true
     try {
@@ -158,11 +181,12 @@ export function useAuthPage() {
         email: trimmedEmail.value,
         password: registerPassword.value,
         code: trimmedCode.value,
+        challenge_id: verificationChallengeId.value,
       })
       setStatus('註冊成功，請登入')
       mode.value = 'login'
     } catch (error) {
-      setError(error)
+      setFormError(registrationErrorMessage(error))
     } finally {
       isSubmitting.value = false
     }
@@ -195,7 +219,7 @@ export function useAuthPage() {
     canSendVerificationCode, hasLoginPassword, loginPasswordType, loginPasswordToggleLabel,
     hasRegisterPassword, registerPasswordType, registerPasswordToggleLabel,
     hasConfirmPassword, confirmPasswordType, confirmPasswordToggleLabel,
-    showRegisterPasswordMismatch, showRegisterPasswordStrengthError, canRegister,
+    showRegisterPasswordMismatch, showRegisterPasswordStrengthError, registerPasswordErrorMessage, canRegister,
     handleLogin, handleSendCode, handleRegister,
   }
 }

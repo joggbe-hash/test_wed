@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	taskDeadLetterKey = "task_stream:dead_letter"
-	taskConsumerGroup = "type-wsp-workers"
-	maxTaskAttempts   = 3
-	staleTaskIdleTime = 5 * time.Minute
-	taskReadBlockTime = 5 * time.Second
+	taskDeadLetterKey         = "task_stream:dead_letter"
+	taskConsumerGroup         = "type-wsp-workers"
+	maxDeadLetterStreamLength = 10_000
+	maxTaskAttempts           = 3
+	staleTaskIdleTime         = 5 * time.Minute
+	taskReadBlockTime         = 5 * time.Second
 )
 
 type Task struct {
@@ -177,15 +178,29 @@ func retryOrDeadLetterTask(ctx context.Context, task Task, cause error) error {
 		return nil
 	}
 
+	return handleExhaustedTask(ctx, task, nextAttempt, cause, finalizeFailedImagePost, moveTaskToDeadLetter)
+}
+
+type imageFailureFinalizer func(context.Context, ImagePostPayload) error
+type deadLetterWriter func(context.Context, string, string, string, int, error) error
+
+func handleExhaustedTask(
+	ctx context.Context,
+	task Task,
+	attempts int,
+	cause error,
+	finalizeImage imageFailureFinalizer,
+	writeDeadLetter deadLetterWriter,
+) error {
 	if task.Type == contracts.TaskProcessImagePost {
 		var payload ImagePostPayload
-		if json.Unmarshal(task.Payload, &payload) == nil && payload.PostID > 0 {
-			if err := markPostFailed(ctx, payload.PostID); err != nil {
-				log.Printf("mark post %d failed after task exhaustion: %v", payload.PostID, err)
+		if json.Unmarshal(task.Payload, &payload) == nil && payload.PostID > 0 && len(payload.RawKeys) > 0 {
+			if err := finalizeImage(ctx, payload); err != nil {
+				return fmt.Errorf("finalize exhausted image task: %w", err)
 			}
 		}
 	}
-	return moveTaskToDeadLetter(ctx, task.MessageID, task.Type, string(task.Payload), nextAttempt, cause)
+	return writeDeadLetter(ctx, task.MessageID, task.Type, string(task.Payload), attempts, cause)
 }
 
 func deadLetterMessage(ctx context.Context, message redis.XMessage, cause error) error {
@@ -215,12 +230,21 @@ func moveTaskToStream(
 	values map[string]any,
 ) error {
 	_, err := rdb.TxPipelined(ctx, func(pipe redis.Pipeliner) error {
-		pipe.XAdd(ctx, &redis.XAddArgs{Stream: destination, Values: values})
+		pipe.XAdd(ctx, taskStreamAddArgs(destination, values))
 		pipe.XAck(ctx, contracts.TaskStreamKey, taskConsumerGroup, messageID)
 		pipe.XDel(ctx, contracts.TaskStreamKey, messageID)
 		return nil
 	})
 	return err
+}
+
+func taskStreamAddArgs(destination string, values map[string]any) *redis.XAddArgs {
+	args := &redis.XAddArgs{Stream: destination, Values: values}
+	if destination == taskDeadLetterKey {
+		args.MaxLen = maxDeadLetterStreamLength
+		args.Approx = true
+	}
+	return args
 }
 
 func acknowledgeTask(ctx context.Context, messageID string) error {

@@ -6,7 +6,7 @@ import InspirationListModal from './InspirationListModal.vue'
 import TaskDeleteConfirmDialog from './TaskDeleteConfirmDialog.vue'
 import SidebarReminderPanel from './SidebarReminderPanel.vue'
 import SidebarTaskPanel from './SidebarTaskPanel.vue'
-import { type ReminderItem, type TaskItem, useScheduleMock } from '../composables/useScheduleMock'
+import { type ReminderItem, type TaskItem, useSchedule } from '../composables/useSchedule'
 import { useSidebarCalendar } from '../features/schedule/useSidebarCalendar'
 import { useSidebarInteractions } from '../features/schedule/useSidebarInteractions'
 
@@ -24,7 +24,7 @@ const {
   toggleTask,
   deleteTask,
   deleteReminder,
-} = useScheduleMock()
+} = useSchedule()
 
 const sidebarReminders = computed(() => todayReminders.value)
 const sidebarTasks = computed(() => todayTasks.value)

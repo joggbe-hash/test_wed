@@ -12,11 +12,9 @@ COPY src ./src
 ARG VITE_SITE_URL=
 ARG VITE_BASE_PATH=/
 ARG VITE_API_BASE_URL=
-ARG VITE_USE_MOCK_API=false
 ENV VITE_SITE_URL=$VITE_SITE_URL
 ENV VITE_BASE_PATH=$VITE_BASE_PATH
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
-ENV VITE_USE_MOCK_API=$VITE_USE_MOCK_API
 
 RUN npm run typecheck \
     && npm exec vite build -- --mode backend --outDir=/frontend-dist --emptyOutDir
@@ -26,9 +24,12 @@ FROM owasp/modsecurity-crs:nginx@sha256:2051ff18b836c1d9bbc5c7754451c1687ea27352
 USER root
 
 RUN if command -v apk >/dev/null 2>&1; then \
-        apk add --no-cache openssl; \
+        apk upgrade --no-cache && apk add --no-cache openssl; \
     else \
-        apt-get update && apt-get install -y --no-install-recommends openssl && rm -rf /var/lib/apt/lists/*; \
+        apt-get update \
+        && apt-get upgrade -y \
+        && apt-get install -y --no-install-recommends openssl \
+        && rm -rf /var/lib/apt/lists/*; \
     fi
 
 COPY Type-WSP-deploy/nginx/scripts/10-validate-tls.sh /docker-entrypoint.d/10-validate-tls.sh

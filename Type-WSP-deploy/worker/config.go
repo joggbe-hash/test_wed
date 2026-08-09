@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -102,6 +103,23 @@ func LoadConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
+	if environment == "production" && !smtpSecure {
+		return nil, fmt.Errorf("SMTP_SECURE must be true when APP_ENV=production")
+	}
+	smtpUsername := strings.TrimSpace(os.Getenv("SMTP_USERNAME"))
+	smtpPassword := os.Getenv("SMTP_PASSWORD")
+	if err := validateProductionSecret(environment, "POSTGRES_PASSWORD", postgresPassword, 16); err != nil {
+		return nil, err
+	}
+	if err := validateProductionRedisURL(environment, redisURL); err != nil {
+		return nil, err
+	}
+	if err := validateProductionSecret(environment, "MINIO_SECRET_KEY", minioSecretKey, 16); err != nil {
+		return nil, err
+	}
+	if err := validateProductionSMTPAuth(environment, smtpUsername, smtpPassword); err != nil {
+		return nil, err
+	}
 
 	return &Config{
 		AppEnv:           environment,
@@ -120,8 +138,8 @@ func LoadConfig() (*Config, error) {
 		SMTPHost:         smtpHost,
 		SMTPPort:         smtpPort,
 		SMTPFrom:         smtpFrom,
-		SMTPUsername:     strings.TrimSpace(os.Getenv("SMTP_USERNAME")),
-		SMTPPassword:     os.Getenv("SMTP_PASSWORD"),
+		SMTPUsername:     smtpUsername,
+		SMTPPassword:     smtpPassword,
 		SMTPSecure:       smtpSecure,
 	}, nil
 }
@@ -157,6 +175,50 @@ func requiredEnv(key string) (string, error) {
 		return "", fmt.Errorf("%s is required", key)
 	}
 	return value, nil
+}
+
+func isPlaceholder(value string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(value))
+	return strings.Contains(normalized, "change_me") || strings.Contains(normalized, "replace_me") ||
+		strings.Contains(normalized, "replace_with")
+}
+
+func validateProductionSecret(environment, key, value string, minimumBytes int) error {
+	if environment != "production" {
+		return nil
+	}
+	if len([]byte(value)) < minimumBytes || isPlaceholder(value) {
+		return fmt.Errorf("%s must be a non-placeholder secret of at least %d bytes when APP_ENV=production", key, minimumBytes)
+	}
+	return nil
+}
+
+func validateProductionRedisURL(environment, rawURL string) error {
+	if environment != "production" {
+		return nil
+	}
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.User == nil {
+		return fmt.Errorf("REDIS_URL must contain production credentials")
+	}
+	password, ok := parsed.User.Password()
+	if !ok {
+		return fmt.Errorf("REDIS_URL must contain a production password")
+	}
+	return validateProductionSecret(environment, "REDIS_URL", password, 16)
+}
+
+func validateProductionSMTPAuth(environment, username, password string) error {
+	if environment != "production" || (username == "" && password == "") {
+		return nil
+	}
+	if username == "" || isPlaceholder(username) {
+		return fmt.Errorf("SMTP_USERNAME must not be blank or a placeholder when SMTP authentication is configured")
+	}
+	if password == "" {
+		return fmt.Errorf("SMTP_PASSWORD is required when SMTP_USERNAME is configured")
+	}
+	return validateProductionSecret(environment, "SMTP_PASSWORD", password, 16)
 }
 
 func environmentBool(environment, key string, developmentFallback bool) (bool, error) {

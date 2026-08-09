@@ -9,7 +9,6 @@ services:
         VITE_SITE_URL: ${VITE_SITE_URL:-}
         VITE_BASE_PATH: ${VITE_BASE_PATH:-/}
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
-        VITE_USE_MOCK_API: ${VITE_USE_MOCK_API:-false}
     container_name: nginx-waf
     ports:
       - "80:8080"
@@ -43,6 +42,10 @@ services:
     depends_on:
       api:
         condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   # Application layer：Go API，處理登入、貼文、上傳、WebSocket。
@@ -89,6 +92,13 @@ services:
       timeout: 5s
       retries: 10
       start_period: 10s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   # Redis 同時做 session store、驗證碼暫存、非同步工作佇列和 Pub/Sub 通知。
@@ -147,6 +157,17 @@ services:
         condition: service_healthy
     deploy:
       replicas: 2
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     restart: unless-stopped
 
   # Data layer：PostgreSQL 只在內部網路，外部不能直接連。
@@ -165,7 +186,7 @@ services:
     networks:
       - db_net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB_SYSTEM:?set POSTGRES_DB_SYSTEM in .env}"]
       interval: 10s
       timeout: 5s
       retries: 5

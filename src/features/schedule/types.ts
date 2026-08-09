@@ -28,10 +28,6 @@ export interface StoredSchedule {
   reminders: ReminderItem[]
 }
 
-export type LegacyScheduleDecisionResult =
-  | { ok: true }
-  | { ok: false; message: string }
-
 export const priorityMeta: Record<Priority, { label: string; rank: number }> = {
   high: { label: '高', rank: 1 },
   medium: { label: '中', rank: 2 },

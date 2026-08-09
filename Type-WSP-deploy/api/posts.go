@@ -35,11 +35,21 @@ type Post struct {
 }
 
 const (
-	maxPostBodyBytes    = 25 << 20
-	maxPostContentRunes = 5000
-	maxMultipartMemory  = 8 << 20
-	maxImageUploadSize  = 8 << 20
-	maxImagesPerPost    = 4
+	maxPostBodyBytes                        = 25 << 20
+	maxPostContentRunes                     = 5000
+	maxMultipartMemory                      = 8 << 20
+	maxImageUploadSize                      = 8 << 20
+	maxImagesPerPost                        = 4
+	maxPendingImagePostsPerUser             = 4
+	maxPostsPerUser                         = 5000
+	maxImageStorageBytesPerUser       int64 = 1 << 30
+	contentQuotaAdvisoryLockNamespace       = 0x54575350
+)
+
+var (
+	errImagePostQuotaExceeded    = errors.New("too many pending image posts")
+	errImageStorageQuotaExceeded = errors.New("image storage quota exceeded")
+	errPostQuotaExceeded         = errors.New("post quota exceeded")
 )
 
 type postVisibility string
@@ -96,9 +106,35 @@ func validPostContent(content string) bool {
 	return utf8.ValidString(content) && utf8.RuneCountInString(content) <= maxPostContentRunes
 }
 
+func postListQuery(onlyOwner, hasCursor bool) string {
+	ownerFilter := "(visibility = 'public' OR user_id = $1)"
+	if onlyOwner {
+		ownerFilter = "user_id = $1"
+	}
+
+	cursorFilter := ""
+	if hasCursor {
+		cursorFilter = " AND (created_at < $2 OR (created_at = $2 AND id < $3))"
+	}
+
+	return `SELECT id, user_id, username, visibility, content, image_url, image_status, created_at
+		 FROM posts
+		 WHERE ` + ownerFilter + cursorFilter + `
+		 ORDER BY created_at DESC, id DESC LIMIT 20`
+}
+
 // handleFeed reads public posts plus private posts owned by the authenticated user.
 // The response is intentionally not shared through a global cache because visibility is user-specific.
 func handleFeed(w http.ResponseWriter, r *http.Request) {
+	handlePostList(w, r, false)
+}
+
+// handlePersonalPosts only returns posts owned by the authenticated user.
+func handlePersonalPosts(w http.ResponseWriter, r *http.Request) {
+	handlePostList(w, r, true)
+}
+
+func handlePostList(w http.ResponseWriter, r *http.Request, onlyOwner bool) {
 	ctx := r.Context()
 	user := currentUser(r)
 	cursor := r.URL.Query().Get("cursor")
@@ -112,17 +148,9 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rows, err = systemPool.Query(ctx,
-			`SELECT id, user_id, username, visibility, content, image_url, image_status, created_at
-			 FROM posts
-			 WHERE (visibility = 'public' OR user_id = $1)
-			   AND (created_at < $2 OR (created_at = $2 AND id < $3))
-			 ORDER BY created_at DESC, id DESC LIMIT 20`, user.ID, parsedCursor.CreatedAt, parsedCursor.ID)
+			postListQuery(onlyOwner, true), user.ID, parsedCursor.CreatedAt, parsedCursor.ID)
 	} else {
-		rows, err = systemPool.Query(ctx,
-			`SELECT id, user_id, username, visibility, content, image_url, image_status, created_at
-			 FROM posts
-			 WHERE visibility = 'public' OR user_id = $1
-			 ORDER BY created_at DESC, id DESC LIMIT 20`, user.ID)
+		rows, err = systemPool.Query(ctx, postListQuery(onlyOwner, false), user.ID)
 	}
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, M{"error": "load feed failed"})
@@ -458,6 +486,16 @@ func isProcessedImageKey(key string) bool {
 func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, content string, visibility postVisibility) {
 	var postID int
 	err := WithTx(ctx, systemPool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::integer, $2::integer)", contentQuotaAdvisoryLockNamespace, user.ID); err != nil {
+			return err
+		}
+		var total int
+		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM posts WHERE user_id = $1", user.ID).Scan(&total); err != nil {
+			return err
+		}
+		if !hasPostCapacity(total) {
+			return errPostQuotaExceeded
+		}
 		return tx.QueryRow(ctx,
 			`INSERT INTO posts (user_id, username, visibility, content, image_status)
 			 VALUES ($1, $2, $3, $4, 'none') RETURNING id`,
@@ -465,6 +503,10 @@ func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, cont
 		).Scan(&postID)
 	})
 	if err != nil {
+		if errors.Is(err, errPostQuotaExceeded) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "post quota exceeded"})
+			return
+		}
 		writeJSON(w, http.StatusInternalServerError, M{"error": "create post failed"})
 		return
 	}
@@ -473,6 +515,33 @@ func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, cont
 }
 
 func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, content string, visibility postVisibility, files []*fileEntry) {
+	var total int
+	var pending int
+	var storedAndReserved int64
+	reservation := imageStorageReservation(len(files))
+	if err := systemPool.QueryRow(ctx,
+		`SELECT COUNT(*),
+		        COUNT(*) FILTER (WHERE image_status = 'processing'),
+		        COALESCE(SUM(image_reserved_bytes + image_storage_bytes), 0)
+		 FROM posts WHERE user_id = $1`,
+		user.ID,
+	).Scan(&total, &pending, &storedAndReserved); err != nil {
+		writeJSON(w, http.StatusInternalServerError, M{"error": "check image queue capacity failed"})
+		return
+	}
+	if !hasPostCapacity(total) {
+		writeJSON(w, http.StatusTooManyRequests, M{"error": "post quota exceeded"})
+		return
+	}
+	if !hasImagePostCapacity(pending) {
+		writeJSON(w, http.StatusTooManyRequests, M{"error": "too many images are still processing"})
+		return
+	}
+	if !hasImageStorageCapacity(storedAndReserved, reservation) {
+		writeJSON(w, http.StatusTooManyRequests, M{"error": "image storage quota exceeded"})
+		return
+	}
+
 	ops := rollback.New()
 
 	var rawKeys []string
@@ -497,15 +566,48 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 	rawKeysJSON, _ := json.Marshal(rawKeys)
 	var postID int
 	err := WithTx(ctx, systemPool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::integer, $2::integer)", contentQuotaAdvisoryLockNamespace, user.ID); err != nil {
+			return err
+		}
+		if err := tx.QueryRow(ctx,
+			`SELECT COUNT(*),
+			        COUNT(*) FILTER (WHERE image_status = 'processing'),
+			        COALESCE(SUM(image_reserved_bytes + image_storage_bytes), 0)
+			 FROM posts WHERE user_id = $1`,
+			user.ID,
+		).Scan(&total, &pending, &storedAndReserved); err != nil {
+			return err
+		}
+		if !hasPostCapacity(total) {
+			return errPostQuotaExceeded
+		}
+		if !hasImagePostCapacity(pending) {
+			return errImagePostQuotaExceeded
+		}
+		if !hasImageStorageCapacity(storedAndReserved, reservation) {
+			return errImageStorageQuotaExceeded
+		}
 		return tx.QueryRow(ctx,
-			`INSERT INTO posts (user_id, username, visibility, content, image_url, image_status)
-			 VALUES ($1, $2, $3, $4, $5, 'processing') RETURNING id`,
-			user.ID, user.Username, visibility, content, string(rawKeysJSON),
+			`INSERT INTO posts (user_id, username, visibility, content, image_url, image_status, image_reserved_bytes)
+			 VALUES ($1, $2, $3, $4, $5, 'processing', $6) RETURNING id`,
+			user.ID, user.Username, visibility, content, string(rawKeysJSON), reservation,
 		).Scan(&postID)
 	})
 	if err != nil {
 		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
 			log.Printf("rollback image post creation failed: %v", rollbackErr)
+		}
+		if errors.Is(err, errImagePostQuotaExceeded) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many images are still processing"})
+			return
+		}
+		if errors.Is(err, errPostQuotaExceeded) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "post quota exceeded"})
+			return
+		}
+		if errors.Is(err, errImageStorageQuotaExceeded) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "image storage quota exceeded"})
+			return
 		}
 		writeJSON(w, http.StatusInternalServerError, M{"error": "create post failed"})
 		return
@@ -528,6 +630,26 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 	}
 
 	writeJSON(w, http.StatusCreated, M{"message": "post created, image processing", "post_id": postID})
+}
+
+func hasImagePostCapacity(pending int) bool {
+	return pending >= 0 && pending < maxPendingImagePostsPerUser
+}
+
+func hasPostCapacity(total int) bool {
+	return total >= 0 && total < maxPostsPerUser
+}
+
+func imageStorageReservation(imageCount int) int64 {
+	if imageCount <= 0 {
+		return 0
+	}
+	return int64(imageCount) * int64(contracts.MaxProcessedImageBytes)
+}
+
+func hasImageStorageCapacity(currentBytes, reservationBytes int64) bool {
+	return currentBytes >= 0 && reservationBytes > 0 && reservationBytes <= maxImageStorageBytesPerUser &&
+		currentBytes <= maxImageStorageBytesPerUser-reservationBytes
 }
 
 // handleGetImage 從 MinIO 讀圖並由 API 回傳，前端不用知道物件儲存內部位址。
@@ -573,6 +695,10 @@ func handleGetImage(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", info.ContentType)
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size))
-	w.Header().Set("Cache-Control", "private, max-age=86400")
+	setAuthorizedImageCachePolicy(w)
 	io.Copy(w, obj)
+}
+
+func setAuthorizedImageCachePolicy(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "private, no-store")
 }

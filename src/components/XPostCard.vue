@@ -9,6 +9,7 @@ import TaskDeleteConfirmDialog from './TaskDeleteConfirmDialog.vue'
 const props = defineProps<{
   post: BackendPost
   isMenuOpen: boolean
+  canDelete: boolean
 }>()
 
 const emit = defineEmits<{
@@ -54,6 +55,7 @@ const postTimeTitle = computed(() => {
 })
 
 function requestDeletePost() {
+  if (!props.canDelete) return
   isDeleteConfirmOpen.value = true
 }
 
@@ -62,6 +64,7 @@ function closeDeleteConfirmation() {
 }
 
 function confirmDeletePost() {
+  if (!props.canDelete) return
   isDeleteConfirmOpen.value = false
   emit('deletePost', props.post.id)
 }
@@ -91,7 +94,7 @@ const settingsIconUrl = publicAsset('icons/settings.png')
           </div>
         </div>
 
-        <div class="relative">
+        <div v-if="props.canDelete" class="relative">
           <button
             :id="postMenuTriggerId"
             type="button"
@@ -142,12 +145,16 @@ const settingsIconUrl = publicAsset('icons/settings.png')
         圖片處理中
       </div>
 
+      <div v-else-if="props.post.image_status === 'failed'" class="x-media-processing x-media-failed" role="status">
+        圖片處理失敗，請刪除貼文後重新上傳。
+      </div>
+
       <PostActions />
     </div>
   </article>
 
   <TaskDeleteConfirmDialog
-    v-if="isDeleteConfirmOpen"
+    v-if="props.canDelete && isDeleteConfirmOpen"
     :item="deleteDialogItem"
     kind="post"
     :return-focus-id="postMenuTriggerId"

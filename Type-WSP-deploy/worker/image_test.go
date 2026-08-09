@@ -2,10 +2,13 @@ package main
 
 import (
 	"bytes"
+	"encoding/binary"
+	"hash/crc32"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"io"
+	"strings"
 	"testing"
 )
 
@@ -60,6 +63,35 @@ func TestResizeAndCompressAlwaysReencodesImage(t *testing.T) {
 	}
 }
 
+func TestResizeAndCompressRejectsImageAboveWorkingSetBudgetBeforeDecode(t *testing.T) {
+	input := pngWithDimensions(5000, 4000)
+	_, err := resizeAndCompress(input)
+	if err == nil || !strings.Contains(err.Error(), "working set") {
+		t.Fatalf("expected working-set rejection, got %v", err)
+	}
+}
+
+func TestResizeAndCompressRejectsDimensionsThatOverflowPixelMultiplication(t *testing.T) {
+	input := pngWithDimensions(^uint32(0), ^uint32(0))
+	_, err := resizeAndCompress(input)
+	if err == nil {
+		t.Fatalf("expected oversized-dimension rejection, got %v", err)
+	}
+}
+
+func TestLimitedImageBufferPreservesBoundedOutput(t *testing.T) {
+	buffer := &limitedImageBuffer{limit: 4}
+	if _, err := buffer.Write([]byte("safe")); err != nil {
+		t.Fatalf("write within limit: %v", err)
+	}
+	if _, err := buffer.Write([]byte("!")); err == nil {
+		t.Fatal("expected output beyond the limit to be rejected")
+	}
+	if got := buffer.String(); got != "safe" {
+		t.Fatalf("buffer changed after rejected write: %q", got)
+	}
+}
+
 func TestProcessedImageKeyIsUniquePerAttempt(t *testing.T) {
 	first := processedImageKey("raw/example.jpg", "attempt-one", ".jpg")
 	second := processedImageKey("raw/example.jpg", "attempt-two", ".jpg")
@@ -70,4 +102,34 @@ func TestProcessedImageKeyIsUniquePerAttempt(t *testing.T) {
 	if first != "processed/example-attempt-one.jpg" {
 		t.Fatalf("unexpected processed key: %q", first)
 	}
+}
+
+func TestProcessedImageBytesSumsPersistentObjects(t *testing.T) {
+	images := []*processedImage{{data: make([]byte, 11)}, {data: make([]byte, 17)}}
+	if got := processedImageBytes(images); got != 28 {
+		t.Fatalf("processedImageBytes = %d, want 28", got)
+	}
+}
+
+func pngWithDimensions(width, height uint32) []byte {
+	result := append([]byte(nil), []byte("\x89PNG\r\n\x1a\n")...)
+	ihdr := make([]byte, 13)
+	binary.BigEndian.PutUint32(ihdr[0:4], width)
+	binary.BigEndian.PutUint32(ihdr[4:8], height)
+	ihdr[8] = 8
+	ihdr[9] = 6
+	result = appendPNGChunk(result, "IHDR", ihdr)
+	return appendPNGChunk(result, "IEND", nil)
+}
+
+func appendPNGChunk(destination []byte, chunkType string, data []byte) []byte {
+	length := make([]byte, 4)
+	binary.BigEndian.PutUint32(length, uint32(len(data)))
+	destination = append(destination, length...)
+	chunkStart := len(destination)
+	destination = append(destination, chunkType...)
+	destination = append(destination, data...)
+	checksum := make([]byte, 4)
+	binary.BigEndian.PutUint32(checksum, crc32.ChecksumIEEE(destination[chunkStart:]))
+	return append(destination, checksum...)
 }
