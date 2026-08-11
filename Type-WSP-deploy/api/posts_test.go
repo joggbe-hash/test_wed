@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -143,5 +144,33 @@ func TestPostCapacityBoundsCumulativePerUserContent(t *testing.T) {
 	}
 	if hasPostCapacity(-1) {
 		t.Fatal("invalid post count was accepted")
+	}
+}
+
+func TestCreateImagePostReservesCapacityBeforeAllocatingObjectStorage(t *testing.T) {
+	source, err := os.ReadFile("posts.go")
+	if err != nil {
+		t.Fatalf("read posts.go: %v", err)
+	}
+	functionStart := bytes.Index(source, []byte("func createImagePost("))
+	if functionStart < 0 {
+		t.Fatal("createImagePost start was not found")
+	}
+	functionEnd := bytes.Index(source[functionStart:], []byte("\nfunc hasImagePostCapacity("))
+	if functionEnd < 0 {
+		t.Fatal("createImagePost end was not found")
+	}
+	functionSource := source[functionStart : functionStart+functionEnd]
+	reserveAt := bytes.Index(functionSource, []byte("reserveImageUpload("))
+	allocateAt := bytes.Index(functionSource, []byte("minioClient.PutObject"))
+	finalizeAt := bytes.Index(functionSource, []byte("finalizeImageUpload("))
+	if reserveAt < 0 || allocateAt < 0 || finalizeAt < 0 {
+		t.Fatal("createImagePost must reserve quota, allocate object storage, and finalize the reservation")
+	}
+	if reserveAt > allocateAt {
+		t.Fatal("object storage was allocated before the request held a quota reservation")
+	}
+	if finalizeAt < allocateAt {
+		t.Fatal("the upload reservation was finalized before object storage completed")
 	}
 }

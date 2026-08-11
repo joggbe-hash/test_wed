@@ -111,7 +111,7 @@ server {
 
     # --- 帳密與驗證碼端點：加嚴格限流（防暴力破解）---
     # session/logout 是正常登入生命週期流量，保留在一般 API limiter。
-    location ~ ^/api/auth/(login|register|send-code)$ {
+    location ~ ^/api/auth/(login(?:/verify)?|register|send-code)$ {
         limit_req zone=api_login burst=10 nodelay;
         limit_req_status 429;
 

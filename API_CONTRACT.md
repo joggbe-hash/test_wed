@@ -56,7 +56,7 @@ Success `200`：`{ "message": string, "challenge_id": string }`
 
 可能錯誤：`400`、`429`、`500`、`503`。
 
-規則：驗證碼有效 5 分鐘、每個來源最多錯誤嘗試 5 次、每個 challenge 全域最多錯誤嘗試 20 次、重新寄送冷卻 1 分鐘。收件信箱寄送上限為每小時 5 次／每日 10 次，來源端上限為每小時 20 次／每日 50 次。每次寄送都會產生新的 `challenge_id` 與驗證碼，且舊 challenge 立即失效；即使錯誤次數達上限，正確驗證碼仍可由合法使用者完成驗證。
+規則：驗證碼有效 5 分鐘、每個來源最多錯誤嘗試 5 次、每個 challenge 全域最多錯誤嘗試 20 次、重新寄送冷卻 1 分鐘。收件信箱寄送上限為每小時 5 次／每日 10 次，來源端上限為每小時 20 次／每日 50 次。每次寄送都會產生新的 `challenge_id` 與驗證碼，且舊 challenge 立即失效；challenge 全域錯誤次數耗盡時會原子失效，必須重新取得驗證碼。
 
 ### `POST /api/auth/register`
 
@@ -85,11 +85,39 @@ Success `201`：`{ "message": "registered", "user_id": 1 }`
 
 Request：`{ "email": string, "password": string, "remember": boolean }`
 
+Success `202`：
+
+```json
+{
+  "message": "login verification code sent",
+  "challenge_id": "2cd53940-fc0d-4972-921b-086061dde6e5",
+  "requires_verification": true,
+  "expires_in_seconds": 300
+}
+```
+
+密碼正確後只寄送登入驗證碼，不建立 Session，也不設定 Cookie。登入與註冊 challenge 使用不同 Redis namespace 與寄送額度。
+
+### `POST /api/auth/login/verify`
+
+Request：
+
+```json
+{
+  "email": "amy@example.com",
+  "code": "123456",
+  "challenge_id": "2cd53940-fc0d-4972-921b-086061dde6e5",
+  "remember": false
+}
+```
+
 Success `200`：`{ "user": User }`，並設定 `session` Cookie。
 
 - 一般 Session 預設 1 天，可由後端環境變數調整。
 - `remember=true` 時為 30 天。
-- 來源端在 5 分鐘內累積 10 次錯誤後會被暫時限制；帳號總錯誤次數只作風險訊號，不會在驗證密碼前阻擋其他乾淨來源的正確登入。
+- 每次新登入都必須完成 6 位數 Email 驗證碼；challenge 有效 5 分鐘且只能成功使用一次。
+- 來源端在 5 分鐘內累積 10 次錯誤密碼後會被暫時限制；帳號總錯誤次數只作風險訊號，不會在驗證密碼前阻擋其他乾淨來源的正確登入。
+- 登入驗證碼每個來源最多錯誤嘗試 5 次、每個 challenge 全域最多 20 次；全域額度耗盡後 challenge 立即失效。
 
 ### `GET /api/auth/session`
 

@@ -490,7 +490,12 @@ func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, cont
 			return err
 		}
 		var total int
-		if err := tx.QueryRow(ctx, "SELECT COUNT(*) FROM posts WHERE user_id = $1", user.ID).Scan(&total); err != nil {
+		if err := tx.QueryRow(ctx,
+			`SELECT
+			    (SELECT COUNT(*) FROM posts WHERE user_id = $1)
+			      + (SELECT COUNT(*) FROM image_upload_reservations WHERE user_id = $1 AND expires_at > NOW())`,
+			user.ID,
+		).Scan(&total); err != nil {
 			return err
 		}
 		if !hasPostCapacity(total) {
@@ -515,88 +520,13 @@ func createTextPost(ctx context.Context, w http.ResponseWriter, user *User, cont
 }
 
 func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, content string, visibility postVisibility, files []*fileEntry) {
-	var total int
-	var pending int
-	var storedAndReserved int64
-	reservation := imageStorageReservation(len(files))
-	if err := systemPool.QueryRow(ctx,
-		`SELECT COUNT(*),
-		        COUNT(*) FILTER (WHERE image_status = 'processing'),
-		        COALESCE(SUM(image_reserved_bytes + image_storage_bytes), 0)
-		 FROM posts WHERE user_id = $1`,
-		user.ID,
-	).Scan(&total, &pending, &storedAndReserved); err != nil {
-		writeJSON(w, http.StatusInternalServerError, M{"error": "check image queue capacity failed"})
-		return
-	}
-	if !hasPostCapacity(total) {
-		writeJSON(w, http.StatusTooManyRequests, M{"error": "post quota exceeded"})
-		return
-	}
-	if !hasImagePostCapacity(pending) {
-		writeJSON(w, http.StatusTooManyRequests, M{"error": "too many images are still processing"})
-		return
-	}
-	if !hasImageStorageCapacity(storedAndReserved, reservation) {
-		writeJSON(w, http.StatusTooManyRequests, M{"error": "image storage quota exceeded"})
-		return
-	}
-
-	ops := rollback.New()
-
-	var rawKeys []string
+	rawKeys := make([]string, 0, len(files))
 	for _, f := range files {
-		rawKey := fmt.Sprintf("%s%s%s", contracts.RawImagePrefix, uuid.New().String(), f.extension)
-		_, err := minioClient.PutObject(ctx, minioBucket, rawKey, f.reader, f.size,
-			minio.PutObjectOptions{ContentType: f.contentType})
-		if err != nil {
-			if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
-				log.Printf("rollback image upload failed: %v", rollbackErr)
-			}
-			writeJSON(w, http.StatusInternalServerError, M{"error": "upload image failed"})
-			return
-		}
-		rawKeys = append(rawKeys, rawKey)
-		capturedKey := rawKey
-		ops.Add("remove raw object "+rawKey, func(cleanupCtx context.Context) error {
-			return minioClient.RemoveObject(cleanupCtx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
-		})
+		rawKeys = append(rawKeys, fmt.Sprintf("%s%s%s", contracts.RawImagePrefix, uuid.New().String(), f.extension))
 	}
 
-	rawKeysJSON, _ := json.Marshal(rawKeys)
-	var postID int
-	err := WithTx(ctx, systemPool, func(tx pgx.Tx) error {
-		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1::integer, $2::integer)", contentQuotaAdvisoryLockNamespace, user.ID); err != nil {
-			return err
-		}
-		if err := tx.QueryRow(ctx,
-			`SELECT COUNT(*),
-			        COUNT(*) FILTER (WHERE image_status = 'processing'),
-			        COALESCE(SUM(image_reserved_bytes + image_storage_bytes), 0)
-			 FROM posts WHERE user_id = $1`,
-			user.ID,
-		).Scan(&total, &pending, &storedAndReserved); err != nil {
-			return err
-		}
-		if !hasPostCapacity(total) {
-			return errPostQuotaExceeded
-		}
-		if !hasImagePostCapacity(pending) {
-			return errImagePostQuotaExceeded
-		}
-		if !hasImageStorageCapacity(storedAndReserved, reservation) {
-			return errImageStorageQuotaExceeded
-		}
-		return tx.QueryRow(ctx,
-			`INSERT INTO posts (user_id, username, visibility, content, image_url, image_status, image_reserved_bytes)
-			 VALUES ($1, $2, $3, $4, $5, 'processing', $6) RETURNING id`,
-			user.ID, user.Username, visibility, content, string(rawKeysJSON), reservation,
-		).Scan(&postID)
-	})
+	reservation, err := reserveImageUpload(ctx, user.ID, len(files), rawKeys)
 	if err != nil {
-		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
-			log.Printf("rollback image post creation failed: %v", rollbackErr)
-		}
 		if errors.Is(err, errImagePostQuotaExceeded) {
 			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many images are still processing"})
 			return
@@ -607,6 +537,41 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 		}
 		if errors.Is(err, errImageStorageQuotaExceeded) {
 			writeJSON(w, http.StatusTooManyRequests, M{"error": "image storage quota exceeded"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, M{"error": "reserve image upload failed"})
+		return
+	}
+
+	ops := rollback.New()
+	ops.Add("delete image upload reservation", func(cleanupCtx context.Context) error {
+		return deleteImageUploadReservation(cleanupCtx, reservation.ID, user.ID)
+	})
+
+	for index, f := range files {
+		rawKey := rawKeys[index]
+		_, err := minioClient.PutObject(ctx, minioBucket, rawKey, f.reader, f.size,
+			minio.PutObjectOptions{ContentType: f.contentType})
+		if err != nil {
+			if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
+				log.Printf("rollback image upload failed: %v", rollbackErr)
+			}
+			writeJSON(w, http.StatusInternalServerError, M{"error": "upload image failed"})
+			return
+		}
+		capturedKey := rawKey
+		ops.Add("remove raw object "+rawKey, func(cleanupCtx context.Context) error {
+			return minioClient.RemoveObject(cleanupCtx, minioBucket, capturedKey, minio.RemoveObjectOptions{})
+		})
+	}
+
+	postID, err := finalizeImageUpload(ctx, reservation.ID, user, content, visibility)
+	if err != nil {
+		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
+			log.Printf("rollback image post creation failed: %v", rollbackErr)
+		}
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusRequestTimeout, M{"error": "image upload reservation expired"})
 			return
 		}
 		writeJSON(w, http.StatusInternalServerError, M{"error": "create post failed"})

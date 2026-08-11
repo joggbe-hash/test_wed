@@ -134,7 +134,7 @@ func verificationEmailMessage(from, recipient, code string) string {
 		"",
 		"你的驗證碼是：" + code,
 		"",
-		"此驗證碼將在 10 分鐘後失效。",
+		"此驗證碼將在 5 分鐘後失效。",
 		"如果不是你本人操作，請忽略這封信。",
 		"",
 	}

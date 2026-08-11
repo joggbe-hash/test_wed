@@ -2,6 +2,24 @@
 
 > 記錄 2026-05-24 ~ 2026-05-25
 
+## 2026-08-11 — 所有登入加入 Email 驗證碼
+
+- `POST /api/auth/login` 在密碼正確後改為回傳短效 challenge 並寄出 Email 驗證碼，不再立即建立 Session。
+- 新增 `POST /api/auth/login/verify`；驗證碼原子消耗成功後才設定 HttpOnly Session Cookie。
+- 登入與註冊驗證碼使用獨立 Redis namespace、寄送冷卻與嘗試額度，避免跨流程重放或互相耗盡。
+- 前端登入頁新增可存取的驗證碼步驟，密碼送出後立即從記憶體狀態清除。
+
+---
+
+## 2026-08-11 — 圖片上傳交易邊界修正
+
+- 新增有期限的圖片上傳配額預留；短 transaction 內以 advisory lock 原子檢查並預留貼文、處理中圖片與儲存配額。
+- MinIO 原始檔上傳只在 transaction 外執行，完成後再用第二個短 transaction 把預留轉成 `processing` 貼文。
+- Worker 會清除逾時預留及其 `raw/` 物件；多個 Worker 以 `SKIP LOCKED` 分工，不會重複認領。
+- MinIO bucket 保留既有 lifecycle 規則，並新增 `raw/` 物件一日後自動過期的最後防線。
+
+---
+
 ## 2026-08-04 — 開發環境寄信、健康檢查與可觀測性
 
 - Worker 新增可替換的 `MailSender` 與 SMTP 實作，寄送失敗沿用 Redis Stream 重試及 Dead Letter。
@@ -180,7 +198,8 @@ api/
 | GET | /api/health | 否 | 健康檢查 |
 | POST | /api/auth/send-code | 否 | 發送驗證碼（存 Redis + Worker 寄信） |
 | POST | /api/auth/register | 否 | 註冊（驗碼比對 + bcrypt + DB） |
-| POST | /api/auth/login | 否 | 登入（建立 Redis session + cookie） |
+| POST | /api/auth/login | 否 | 驗證密碼並寄送登入驗證碼（不建立 Session） |
+| POST | /api/auth/login/verify | 否 | 驗證登入碼後建立 Redis Session + Cookie |
 | POST | /api/auth/logout | 否 | 登出（刪除 session） |
 | GET | /api/feed | 是 | 動態牆（最新 20 筆，Redis 快取 30s，cursor 分頁） |
 | POST | /api/posts | 是 | 發文（純文字直寫 DB / 帶圖走 Worker） |

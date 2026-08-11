@@ -33,6 +33,17 @@ export function loginErrorMessage(error: unknown) {
   return apiErrorMessage(error, '登入失敗，請稍後再試。')
 }
 
+export function loginVerificationErrorMessage(error: unknown) {
+  if (error instanceof ApiError && error.status === 400) {
+    return '登入驗證碼不正確、已過期，或不是最新一封，請重新確認。'
+  }
+  if (error instanceof ApiError && error.status === 429) {
+    return '登入驗證碼錯誤次數過多，請重新輸入帳密取得新的驗證碼。'
+  }
+
+  return apiErrorMessage(error, '登入驗證失敗，請稍後再試。')
+}
+
 export function verificationSendErrorMessage(error: unknown) {
   if (error instanceof ApiError && error.status === 429) {
     return '驗證碼傳送太頻繁。每次需間隔 60 秒；若已達寄送上限，請稍後再試。'

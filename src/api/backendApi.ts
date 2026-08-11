@@ -4,10 +4,12 @@ import type {
   CreatePostResponse,
   CurrentSessionResponse,
   FeedResponse,
+  LoginChallengeResponse,
+  LoginResponse,
+  LoginVerificationRequest,
   PostVisibility,
   RegisterAccountRequest,
   SendVerificationCodeResponse,
-  User,
 } from './contracts'
 import type { StoredSchedule } from '../features/schedule/types'
 
@@ -92,11 +94,22 @@ export function registerAccount(payload: RegisterAccountRequest) {
 }
 
 export function loginAccount(email: string, password: string, remember = false) {
-  return apiFetch<{ user: User }>(
+  return apiFetch<LoginChallengeResponse>(
     '/api/auth/login',
     {
       method: 'POST',
       body: JSON.stringify({ email, password, remember }),
+    },
+    { redirectOnUnauthorized: false },
+  )
+}
+
+export function verifyLoginAccount(payload: LoginVerificationRequest) {
+  return apiFetch<LoginResponse>(
+    '/api/auth/login/verify',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
     },
     { redirectOnUnauthorized: false },
   )

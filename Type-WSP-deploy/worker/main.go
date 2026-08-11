@@ -71,6 +71,9 @@ func main() {
 			log.Fatalf("create MinIO bucket failed: %v", err)
 		}
 	}
+	if err := ensureRawImageLifecycle(ctx); err != nil {
+		log.Fatalf("configure MinIO lifecycle failed: %v", err)
+	}
 
 	dsn := workerPostgresDSN(cfg)
 	systemPool, err = pgxpool.New(ctx, dsn)
@@ -78,6 +81,7 @@ func main() {
 		log.Fatalf("connect system_db failed: %v", err)
 	}
 	defer systemPool.Close()
+	go runUploadReservationJanitor(ctx)
 
 	consumerName, err := os.Hostname()
 	if err != nil || consumerName == "" {

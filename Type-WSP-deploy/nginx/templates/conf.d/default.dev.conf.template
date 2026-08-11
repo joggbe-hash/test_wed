@@ -49,7 +49,7 @@ server {
         proxy_buffers 8 16k;
     }
 
-    location ~ ^/api/auth/(login|register|send-code)$ {
+    location ~ ^/api/auth/(login(?:/verify)?|register|send-code)$ {
         limit_req zone=api_login burst=10 nodelay;
         limit_req_status 429;
         proxy_pass http://api_backend;

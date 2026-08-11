@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import LoginVerificationStep from '../components/auth/LoginVerificationStep.vue'
 import { useAuthPage } from '../features/auth/useAuthPage'
 
 const {
   mode,
   email,
   loginPassword,
+  loginStage,
+  loginCode,
   registerPassword,
   username,
   code,
@@ -36,6 +39,8 @@ const {
   registerPasswordErrorMessage,
   canRegister,
   handleLogin,
+  handleVerifyLogin,
+  resetLoginVerification,
   handleSendCode,
   handleRegister,
 } = useAuthPage()
@@ -57,8 +62,9 @@ const {
         class="form-section"
         :inert="mode !== 'login'"
         :aria-hidden="mode !== 'login'"
-        @submit.prevent="handleLogin"
+        @submit.prevent="loginStage === 'credentials' ? handleLogin() : handleVerifyLogin()"
       >
+        <template v-if="loginStage === 'credentials'">
         <div class="input-group">
           <label class="input-label" for="login-email">信箱</label>
           <input
@@ -134,6 +140,17 @@ const {
             {{ isSubmitting ? '登入中' : '登入' }}
           </button>
         </div>
+        </template>
+
+        <LoginVerificationStep
+          v-else
+          v-model="loginCode"
+          :email="email"
+          :is-submitting="isSubmitting"
+          :status-message="statusMessage"
+          :error-message="errorMessage"
+          @restart="resetLoginVerification"
+        />
       </form>
 
       <form

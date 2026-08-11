@@ -257,7 +257,7 @@ func TestDestroySessionPropagatesStoreFailure(t *testing.T) {
 	}
 }
 
-func TestLogoutReportsSessionStoreFailureAndClearsCookie(t *testing.T) {
+func TestLogoutReportsSessionStoreFailureAndPreservesCookieForRetry(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: "signed-session"})
 	response := httptest.NewRecorder()
@@ -269,9 +269,26 @@ func TestLogoutReportsSessionStoreFailureAndClearsCookie(t *testing.T) {
 	if response.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusServiceUnavailable)
 	}
+	if cookies := response.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("failed logout replaced the retry credential: %#v", cookies)
+	}
+}
+
+func TestLogoutClearsCookieAfterSessionStoreSucceeds(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: "signed-session"})
+	response := httptest.NewRecorder()
+
+	handleLogoutWithDestroyer(response, req, func(context.Context, string) error {
+		return nil
+	})
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
 	cookies := response.Result().Cookies()
 	if len(cookies) != 1 || cookies[0].Name != "session" || cookies[0].MaxAge >= 0 {
-		t.Fatalf("logout did not clear the browser cookie: %#v", cookies)
+		t.Fatalf("successful logout did not clear the browser cookie: %#v", cookies)
 	}
 }
 

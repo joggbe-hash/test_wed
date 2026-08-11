@@ -58,6 +58,7 @@ func newMuxWithDependencies(loadSession sessionLoader, ready readinessChecker) *
 	mux.HandleFunc("POST /api/auth/send-code", requireBrowserRequest(handleSendCode))
 	mux.HandleFunc("POST /api/auth/register", requireBrowserRequest(handleRegister))
 	mux.HandleFunc("POST /api/auth/login", requireBrowserRequest(handleLogin))
+	mux.HandleFunc("POST /api/auth/login/verify", requireBrowserRequest(handleLoginVerification))
 	mux.HandleFunc("GET /api/auth/session", requireAuthWithLoader(handleCurrentSession, loadSession))
 	mux.HandleFunc("POST /api/auth/logout", requireBrowserRequest(handleLogout))
 

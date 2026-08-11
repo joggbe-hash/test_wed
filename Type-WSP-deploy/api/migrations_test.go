@@ -24,8 +24,24 @@ func TestImageStorageQuotaMigrationAddsPersistentAccounting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load system migrations: %v", err)
 	}
-	latest := items[len(items)-1]
+	var allSQL strings.Builder
+	for _, item := range items {
+		allSQL.WriteString(item.sql)
+	}
 	for _, expected := range []string{"image_reserved_bytes", "image_storage_bytes"} {
+		if !strings.Contains(allSQL.String(), expected) {
+			t.Fatalf("system migrations do not add %s", expected)
+		}
+	}
+}
+
+func TestLatestMigrationAddsExpiringImageUploadReservations(t *testing.T) {
+	items, err := loadMigrations("migrations/system")
+	if err != nil {
+		t.Fatalf("load system migrations: %v", err)
+	}
+	latest := items[len(items)-1]
+	for _, expected := range []string{"image_upload_reservations", "raw_keys", "reserved_bytes", "expires_at"} {
 		if !strings.Contains(latest.sql, expected) {
 			t.Fatalf("latest migration %s does not add %s", latest.name, expected)
 		}

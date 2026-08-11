@@ -85,8 +85,46 @@ func TestLoginPreAuthenticationBlockUsesOnlyClientBudget(t *testing.T) {
 	if !loginPreAuthenticationShouldBlock(loginAttemptLimit+1, 0) {
 		t.Fatal("login was allowed after the client failure budget was exhausted")
 	}
-	if loginPreAuthenticationShouldBlock(0, accountLoginAttemptLimit+1) {
+	if loginPreAuthenticationShouldBlock(0, accountLoginAttemptLimit) {
 		t.Fatal("account-wide risk blocked a clean client before password verification")
+	}
+}
+
+func TestLoginVerificationKeysAreIsolatedFromRegistration(t *testing.T) {
+	email := "user@example.com"
+	challengeID := "69ca80a8-e3be-4dbf-8a4b-6600146f5574"
+
+	if loginVerificationCodeKey(email) == verificationCodeKey(email) {
+		t.Fatal("login and registration shared a verification-code key")
+	}
+	if loginVerificationActiveChallengeKey(email) == verificationActiveChallengeKey(email) {
+		t.Fatal("login and registration shared an active-challenge key")
+	}
+	if loginVerificationChallengeAttemptKey(challengeID) == verificationChallengeAttemptKey(challengeID) {
+		t.Fatal("login and registration shared a challenge-attempt key")
+	}
+	if loginVerificationSendCooldownKey(email) == verificationSendCooldownKey(email) {
+		t.Fatal("login and registration shared a send-cooldown key")
+	}
+}
+
+func TestLoginVerificationResponseRequiresCodeBeforeSession(t *testing.T) {
+	previous := debugVerificationCode
+	debugVerificationCode = false
+	t.Cleanup(func() { debugVerificationCode = previous })
+
+	response := loginVerificationCodeResponse("challenge-id", "123456")
+	if response["requires_verification"] != true {
+		t.Fatalf("requires_verification = %#v, want true", response["requires_verification"])
+	}
+	if response["challenge_id"] != "challenge-id" {
+		t.Fatalf("challenge_id = %#v", response["challenge_id"])
+	}
+	if _, exists := response["user"]; exists {
+		t.Fatal("password phase exposed an authenticated user")
+	}
+	if _, exists := response["debug_code"]; exists {
+		t.Fatal("production login challenge exposed the verification code")
 	}
 }
 

@@ -6,8 +6,10 @@ import { useAuthPage } from './useAuthPage'
 
 const mocks = vi.hoisted(() => ({
   loginAccount: vi.fn(),
+  verifyLoginAccount: vi.fn(),
   registerAccount: vi.fn(),
   sendVerificationCode: vi.fn(),
+  setCurrentSession: vi.fn(),
   replace: vi.fn(),
 }))
 
@@ -18,6 +20,7 @@ vi.mock('../../api/backendApi', () => ({
     }
   },
   loginAccount: mocks.loginAccount,
+  verifyLoginAccount: mocks.verifyLoginAccount,
   registerAccount: mocks.registerAccount,
   sendVerificationCode: mocks.sendVerificationCode,
 }))
@@ -29,7 +32,7 @@ vi.mock('../../composables/useSession', async () => {
       currentUser: shallowRef(null),
       isSessionInitialized: shallowRef(false),
       restoreCurrentSession: vi.fn().mockResolvedValue(null),
-      setCurrentSession: vi.fn(),
+      setCurrentSession: mocks.setCurrentSession,
     }),
   }
 })
@@ -83,6 +86,49 @@ describe('useAuthPage verification challenge', () => {
       code: '654321',
       challenge_id: 'challenge-2',
     }))
+  })
+
+  it('requires the email code before creating the browser session', async () => {
+    mocks.loginAccount.mockResolvedValueOnce({
+      message: 'login verification code sent',
+      challenge_id: 'login-challenge-1',
+      requires_verification: true,
+      expires_in_seconds: 300,
+    })
+    mocks.verifyLoginAccount.mockResolvedValueOnce({
+      user: { id: 7, username: 'tester' },
+    })
+
+    let auth!: ReturnType<typeof useAuthPage>
+    mount(defineComponent({
+      setup() {
+        auth = useAuthPage()
+        return () => h('div')
+      },
+    }))
+    await flushPromises()
+
+    auth.email.value = 'user@example.com'
+    auth.loginPassword.value = 'Password1'
+    await auth.handleLogin()
+
+    expect(auth.loginStage.value).toBe('verification')
+    expect(auth.loginChallengeId.value).toBe('login-challenge-1')
+    expect(auth.loginPassword.value).toBe('')
+    expect(mocks.setCurrentSession).not.toHaveBeenCalled()
+    expect(mocks.replace).not.toHaveBeenCalled()
+
+    auth.loginCode.value = '123456'
+    await auth.handleVerifyLogin()
+
+    expect(mocks.verifyLoginAccount).toHaveBeenCalledWith({
+      email: 'user@example.com',
+      code: '123456',
+      challenge_id: 'login-challenge-1',
+      remember: false,
+    })
+    expect(mocks.setCurrentSession).toHaveBeenCalledWith({ id: 7, username: 'tester' })
+    expect(mocks.replace).toHaveBeenCalledWith('/home')
   })
 
   it('shows actionable messages for each authentication rate limit', async () => {

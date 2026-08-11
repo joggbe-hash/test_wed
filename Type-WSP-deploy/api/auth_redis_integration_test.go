@@ -41,6 +41,44 @@ func TestRedisVerificationAttemptBudgetDoesNotInvalidateCorrectCode(t *testing.T
 	}
 }
 
+func TestRedisVerificationChallengeBudgetInvalidatesCorrectCode(t *testing.T) {
+	client := useIntegrationRedis(t)
+	ctx := context.Background()
+	email := "user@example.com"
+	challengeID := "adf04b8e-9ae7-4dd5-a924-0b299a5aa865"
+	if err := activateVerificationChallenge(ctx, email, challengeID, "123456"); err != nil {
+		t.Fatalf("activate verification challenge: %v", err)
+	}
+
+	for attempt := 1; attempt <= verificationChallengeAttemptLimit; attempt++ {
+		result, err := consumeVerificationCode(ctx, email, challengeID, fmt.Sprintf("attacker-%d", attempt), "000000")
+		if err != nil {
+			t.Fatalf("attempt %d: %v", attempt, err)
+		}
+		if attempt < verificationChallengeAttemptLimit && result != verificationRejected {
+			t.Fatalf("attempt %d result = %d, want rejected", attempt, result)
+		}
+		if attempt == verificationChallengeAttemptLimit && result != verificationLocked {
+			t.Fatalf("attempt %d result = %d, want locked", attempt, result)
+		}
+	}
+
+	result, err := consumeVerificationCode(ctx, email, challengeID, "legitimate-client", "123456")
+	if err != nil {
+		t.Fatalf("post-lock attempt: %v", err)
+	}
+	if result != verificationExpired {
+		t.Fatalf("post-lock result = %d, want expired", result)
+	}
+	remaining, err := client.Exists(ctx, verificationCodeKey(email), verificationActiveChallengeKey(email)).Result()
+	if err != nil {
+		t.Fatalf("check invalidated challenge: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("challenge keys remaining after lock = %d, want 0", remaining)
+	}
+}
+
 func TestRedisResendInvalidatesPreviousVerificationChallenge(t *testing.T) {
 	useIntegrationRedis(t)
 	ctx := context.Background()
@@ -67,6 +105,41 @@ func TestRedisResendInvalidatesPreviousVerificationChallenge(t *testing.T) {
 	}
 	if result != verificationAccepted {
 		t.Fatalf("new challenge result = %d, want accepted", result)
+	}
+}
+
+func TestRedisLoginVerificationChallengeIsSingleUseAndFlowIsolated(t *testing.T) {
+	useIntegrationRedis(t)
+	ctx := context.Background()
+	email := "user@example.com"
+	challengeID := "2cd53940-fc0d-4972-921b-086061dde6e5"
+
+	if err := activateLoginVerificationChallenge(ctx, email, challengeID, "123456"); err != nil {
+		t.Fatalf("activate login challenge: %v", err)
+	}
+
+	registrationResult, err := consumeVerificationCode(ctx, email, challengeID, "client", "123456")
+	if err != nil {
+		t.Fatalf("consume login code through registration flow: %v", err)
+	}
+	if registrationResult != verificationExpired {
+		t.Fatalf("registration accepted a login code: result = %d", registrationResult)
+	}
+
+	result, err := consumeLoginVerificationCode(ctx, email, challengeID, "client", "123456")
+	if err != nil {
+		t.Fatalf("consume login challenge: %v", err)
+	}
+	if result != verificationAccepted {
+		t.Fatalf("login challenge result = %d, want accepted", result)
+	}
+
+	result, err = consumeLoginVerificationCode(ctx, email, challengeID, "client", "123456")
+	if err != nil {
+		t.Fatalf("reuse login challenge: %v", err)
+	}
+	if result != verificationExpired {
+		t.Fatalf("reused login challenge result = %d, want expired", result)
 	}
 }
 

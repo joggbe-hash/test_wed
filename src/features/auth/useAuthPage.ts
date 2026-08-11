@@ -5,10 +5,12 @@ import {
   loginAccount,
   registerAccount,
   sendVerificationCode,
+  verifyLoginAccount,
 } from '../../api/backendApi'
 import {
   apiErrorMessage,
   loginErrorMessage,
+  loginVerificationErrorMessage,
   registrationErrorMessage,
   verificationSendErrorMessage,
 } from '../../api/errors'
@@ -29,6 +31,10 @@ export function useAuthPage() {
   const mode = shallowRef<'login' | 'register'>('login')
   const email = shallowRef('')
   const loginPassword = shallowRef('')
+  const loginStage = shallowRef<'credentials' | 'verification'>('credentials')
+  const loginCode = shallowRef('')
+  const loginChallengeId = shallowRef('')
+  const loginChallengeEmail = shallowRef('')
   const registerPassword = shallowRef('')
   const username = shallowRef('')
   const code = shallowRef('')
@@ -55,6 +61,7 @@ export function useAuthPage() {
   const normalizedEmail = computed(() => trimmedEmail.value.toLowerCase())
   const trimmedUsername = computed(() => username.value.trim())
   const trimmedCode = computed(() => code.value.trim())
+  const trimmedLoginCode = computed(() => loginCode.value.trim())
   const isRegisterEmailValid = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail.value))
   const showRegisterEmailFormatError = computed(() => email.value.length > 0 && !isRegisterEmailValid.value)
   const isRegisterUsernameValid = computed(() =>
@@ -109,6 +116,9 @@ export function useAuthPage() {
       verificationChallengeEmail.value = ''
       code.value = ''
     }
+    if (loginChallengeEmail.value && value !== loginChallengeEmail.value) {
+      resetLoginVerification()
+    }
   })
 
   function setStatus(message: string) {
@@ -138,14 +148,52 @@ export function useAuthPage() {
 
     isSubmitting.value = true
     try {
-      const { user } = await loginAccount(trimmedEmail.value, loginPassword.value, rememberMe.value)
-      setCurrentSession(user)
-      await router.replace(redirectAfterLogin())
+      const challenge = await loginAccount(trimmedEmail.value, loginPassword.value, rememberMe.value)
+      loginChallengeId.value = challenge.challenge_id
+      loginChallengeEmail.value = normalizedEmail.value
+      loginCode.value = ''
+      loginPassword.value = ''
+      loginStage.value = 'verification'
+      setStatus('登入驗證碼已寄出，請在 5 分鐘內輸入。')
     } catch (error) {
       setFormError(loginErrorMessage(error))
     } finally {
       isSubmitting.value = false
     }
+  }
+
+  async function handleVerifyLogin() {
+    if (!loginChallengeId.value || loginChallengeEmail.value !== normalizedEmail.value) {
+      return setFormError('登入驗證已失效，請重新輸入電子信箱與密碼。')
+    }
+    if (!/^\d{6}$/.test(trimmedLoginCode.value)) {
+      return setFormError('請輸入 6 位數登入驗證碼。')
+    }
+
+    isSubmitting.value = true
+    try {
+      const { user } = await verifyLoginAccount({
+        email: loginChallengeEmail.value,
+        code: trimmedLoginCode.value,
+        challenge_id: loginChallengeId.value,
+        remember: rememberMe.value,
+      })
+      setCurrentSession(user)
+      await router.replace(redirectAfterLogin())
+    } catch (error) {
+      setFormError(loginVerificationErrorMessage(error))
+    } finally {
+      isSubmitting.value = false
+    }
+  }
+
+  function resetLoginVerification() {
+    loginStage.value = 'credentials'
+    loginCode.value = ''
+    loginChallengeId.value = ''
+    loginChallengeEmail.value = ''
+    statusMessage.value = ''
+    errorMessage.value = ''
   }
 
   async function handleSendCode() {
@@ -212,7 +260,8 @@ export function useAuthPage() {
   })
 
   return {
-    mode, email, loginPassword, registerPassword, username, code, confirmPassword,
+    mode, email, loginPassword, loginStage, loginCode, loginChallengeId,
+    registerPassword, username, code, confirmPassword,
     isSubmitting, statusMessage, errorMessage, showLoginPassword, showRegisterPassword,
     showConfirmPassword, rememberMe, isCheckingSession, authBackgroundStyle,
     registerBackgroundStyle, showRegisterEmailFormatError, showRegisterUsernameError,
@@ -220,6 +269,6 @@ export function useAuthPage() {
     hasRegisterPassword, registerPasswordType, registerPasswordToggleLabel,
     hasConfirmPassword, confirmPasswordType, confirmPasswordToggleLabel,
     showRegisterPasswordMismatch, showRegisterPasswordStrengthError, registerPasswordErrorMessage, canRegister,
-    handleLogin, handleSendCode, handleRegister,
+    handleLogin, handleVerifyLogin, resetLoginVerification, handleSendCode, handleRegister,
   }
 }

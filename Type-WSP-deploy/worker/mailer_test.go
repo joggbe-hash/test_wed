@@ -19,6 +19,7 @@ func TestVerificationEmailMessageUsesCRLFAndRequiredHeaders(t *testing.T) {
 		"Subject: ",
 		"Content-Type: text/plain; charset=UTF-8\r\n",
 		"你的驗證碼是：123456",
+		"此驗證碼將在 5 分鐘後失效。",
 	} {
 		if !strings.Contains(message, expected) {
 			t.Fatalf("message does not contain %q", expected)

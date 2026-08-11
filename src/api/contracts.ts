@@ -35,6 +35,23 @@ export interface SendVerificationCodeResponse extends ApiMessageResponse {
   challenge_id: string
 }
 
+export interface LoginChallengeResponse extends ApiMessageResponse {
+  challenge_id: string
+  requires_verification: true
+  expires_in_seconds: number
+}
+
+export interface LoginVerificationRequest {
+  email: string
+  code: string
+  challenge_id: string
+  remember: boolean
+}
+
+export interface LoginResponse {
+  user: User
+}
+
 export interface RegisterAccountRequest {
   username: string
   email: string
