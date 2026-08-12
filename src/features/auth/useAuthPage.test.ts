@@ -66,7 +66,7 @@ describe('useAuthPage verification challenge', () => {
 
     auth.email.value = 'first@example.com'
     await auth.handleSendCode()
-    auth.code.value = '123456'
+    auth.code.value = 'ABCDEFGHJKLMNPQR'
     auth.username.value = 'tester'
     auth.registerPassword.value = 'password1'
     auth.confirmPassword.value = 'password1'
@@ -78,12 +78,12 @@ describe('useAuthPage verification challenge', () => {
     expect(auth.canRegister.value).toBe(false)
 
     await auth.handleSendCode()
-    auth.code.value = '654321'
+    auth.code.value = '23456789ABCDEFGH'
     await auth.handleRegister()
 
     expect(mocks.registerAccount).toHaveBeenCalledWith(expect.objectContaining({
       email: 'second@example.com',
-      code: '654321',
+      code: '23456789ABCDEFGH',
       challenge_id: 'challenge-2',
     }))
   })
@@ -159,7 +159,7 @@ describe('useAuthPage verification challenge', () => {
     expect(auth.statusMessage.value).toBe('驗證碼已送出，請查看最新一封信。')
 
     mocks.registerAccount.mockRejectedValueOnce(new ApiError(429, 'too many verification attempts'))
-    auth.code.value = '123456'
+    auth.code.value = 'ABCDEFGHJKLMNPQR'
     auth.username.value = 'tester'
     auth.registerPassword.value = 'password1'
     auth.confirmPassword.value = 'password1'

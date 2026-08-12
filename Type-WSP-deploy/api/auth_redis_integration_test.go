@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,7 +42,7 @@ func TestRedisVerificationAttemptBudgetDoesNotInvalidateCorrectCode(t *testing.T
 	}
 }
 
-func TestRedisVerificationChallengeBudgetInvalidatesCorrectCode(t *testing.T) {
+func TestRedisVerificationChallengeBudgetDoesNotInvalidateHighEntropyCorrectCode(t *testing.T) {
 	client := useIntegrationRedis(t)
 	ctx := context.Background()
 	email := "user@example.com"
@@ -67,10 +68,10 @@ func TestRedisVerificationChallengeBudgetInvalidatesCorrectCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("post-lock attempt: %v", err)
 	}
-	if result != verificationExpired {
-		t.Fatalf("post-lock result = %d, want expired", result)
+	if result != verificationAccepted {
+		t.Fatalf("post-lock result = %d, want accepted", result)
 	}
-	remaining, err := client.Exists(ctx, verificationCodeKey(email), verificationActiveChallengeKey(email)).Result()
+	remaining, err := client.Exists(ctx, verificationCodeKey(email, challengeID)).Result()
 	if err != nil {
 		t.Fatalf("check invalidated challenge: %v", err)
 	}
@@ -79,7 +80,7 @@ func TestRedisVerificationChallengeBudgetInvalidatesCorrectCode(t *testing.T) {
 	}
 }
 
-func TestRedisResendInvalidatesPreviousVerificationChallenge(t *testing.T) {
+func TestRedisResendKeepsPreviousVerificationChallengeUsable(t *testing.T) {
 	useIntegrationRedis(t)
 	ctx := context.Background()
 	email := "user@example.com"
@@ -96,8 +97,8 @@ func TestRedisResendInvalidatesPreviousVerificationChallenge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consume old challenge: %v", err)
 	}
-	if result != verificationExpired {
-		t.Fatalf("old challenge result = %d, want expired", result)
+	if result != verificationAccepted {
+		t.Fatalf("old challenge result = %d, want accepted", result)
 	}
 	result, err = consumeVerificationCode(ctx, email, newChallengeID, "client", "654321")
 	if err != nil {
@@ -168,20 +169,66 @@ func TestRedisVerificationSendBudgetHasCumulativeHourlyBound(t *testing.T) {
 	}
 }
 
-func TestRedisLoginAccountBudgetCannotBeResetByChangingClient(t *testing.T) {
+func TestRedisAccountRiskSignalDoesNotLockOutCleanClient(t *testing.T) {
 	useIntegrationRedis(t)
 	ctx := context.Background()
 	email := "user@example.com"
 	var accountAttempts int64
 	for attempt := 1; attempt <= accountLoginAttemptLimit; attempt++ {
-		_, current, err := recordFailedLoginAttempt(ctx, email, fmt.Sprintf("203.0.113.%d", attempt))
+		allowed, _, current, err := reserveLoginAttempt(ctx, email, fmt.Sprintf("203.0.113.%d", attempt))
 		if err != nil {
 			t.Fatalf("attempt %d: %v", attempt, err)
+		}
+		if !allowed {
+			t.Fatalf("attempt %d was rejected before the account budget was exhausted", attempt)
 		}
 		accountAttempts = current
 	}
 	if !accountLoginAttemptShouldBlock(accountAttempts) {
 		t.Fatalf("account attempts = %d, want blocked", accountAttempts)
+	}
+	allowed, _, current, err := reserveLoginAttempt(ctx, email, "198.51.100.1")
+	if err != nil {
+		t.Fatalf("bounded attempt: %v", err)
+	}
+	if !allowed || current != accountLoginAttemptLimit {
+		t.Fatalf("clean-client attempt after account signal = allowed %v, count %d", allowed, current)
+	}
+}
+
+func TestRedisLoginAccountBudgetIsAtomicAcrossConcurrentClients(t *testing.T) {
+	useIntegrationRedis(t)
+	ctx := context.Background()
+	const attempts = 64
+
+	type result struct {
+		allowed bool
+		err     error
+	}
+	results := make(chan result, attempts)
+	var group sync.WaitGroup
+	for attempt := 0; attempt < attempts; attempt++ {
+		group.Add(1)
+		go func(index int) {
+			defer group.Done()
+			allowed, _, _, err := reserveLoginAttempt(ctx, "target@example.com", fmt.Sprintf("198.51.100.%d", index))
+			results <- result{allowed: allowed, err: err}
+		}(attempt)
+	}
+	group.Wait()
+	close(results)
+
+	allowedCount := 0
+	for current := range results {
+		if current.err != nil {
+			t.Fatalf("concurrent reservation failed: %v", current.err)
+		}
+		if current.allowed {
+			allowedCount++
+		}
+	}
+	if allowedCount != attempts {
+		t.Fatalf("concurrent clean clients allowed %d attempts, want %d", allowedCount, attempts)
 	}
 }
 

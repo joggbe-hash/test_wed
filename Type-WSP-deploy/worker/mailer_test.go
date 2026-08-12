@@ -27,6 +27,13 @@ func TestVerificationEmailMessageUsesCRLFAndRequiredHeaders(t *testing.T) {
 	}
 }
 
+func TestRegistrationVerificationEmailUsesRegistrationExpiry(t *testing.T) {
+	message := verificationEmailMessage("no-reply@type-wsp.local", "user@example.test", "ABCDEFGHJKLMNPQR")
+	if !strings.Contains(message, "24 小時") {
+		t.Fatalf("registration email does not describe its 24-hour expiry: %q", message)
+	}
+}
+
 func TestMaskEmailDoesNotExposeFullAddress(t *testing.T) {
 	if got := maskEmail("quality@example.test"); got != "qu***@example.test" {
 		t.Fatalf("maskEmail() = %q", got)
@@ -67,6 +74,19 @@ func TestSMTPMailSenderDeliversVerificationMessage(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for SMTP message")
+	}
+}
+
+func TestVerificationCodeValidationAcceptsRegistrationAndLoginFormats(t *testing.T) {
+	for _, code := range []string{"123456", "ABCDEFGHJKLMNPQR"} {
+		if !validVerificationEmailCode(code) {
+			t.Fatalf("valid verification code rejected: %q", code)
+		}
+	}
+	for _, code := range []string{"12345", "abcdefghijklmnop", "ABCDEFGHILMNPQRO"} {
+		if validVerificationEmailCode(code) {
+			t.Fatalf("invalid verification code accepted: %q", code)
+		}
 	}
 }
 

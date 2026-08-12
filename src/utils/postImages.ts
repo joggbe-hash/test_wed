@@ -1,5 +1,6 @@
 export const maxPostImages = 4
-export const maxPostImageBytes = 8 * 1024 * 1024
+export const maxPostImageMiB = 3
+export const maxPostImageBytes = maxPostImageMiB * 1024 * 1024
 export const acceptedPostImageTypes = ['image/jpeg', 'image/png'] as const
 export const acceptedPostImageInput = acceptedPostImageTypes.join(',')
 
@@ -32,10 +33,9 @@ export function validatePostImages(files: Iterable<File>): PostImageValidationRe
   if (oversized) {
     return {
       accepted: [],
-      errorMessage: `「${oversized.name}」超過每張 8 MiB 的限制。`,
+      errorMessage: `「${oversized.name}」超過每張 ${maxPostImageMiB} MiB 的限制。`,
     }
   }
 
   return { accepted: selected, errorMessage: '' }
 }
-

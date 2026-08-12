@@ -95,7 +95,7 @@ export function useAuthPage() {
     isRegisterEmailValid.value &&
     verificationChallengeId.value.length > 0 &&
     verificationChallengeEmail.value === normalizedEmail.value &&
-    /^\d{6}$/.test(trimmedCode.value) &&
+    /^[A-HJ-NP-Z2-9]{16}$/.test(trimmedCode.value.toUpperCase()) &&
     isRegisterUsernameValid.value &&
     isRegisterPasswordStrong.value &&
     isRegisterPasswordMatched.value,
@@ -228,7 +228,7 @@ export function useAuthPage() {
         username: trimmedUsername.value,
         email: trimmedEmail.value,
         password: registerPassword.value,
-        code: trimmedCode.value,
+        code: trimmedCode.value.toUpperCase(),
         challenge_id: verificationChallengeId.value,
       })
       setStatus('註冊成功，請登入')

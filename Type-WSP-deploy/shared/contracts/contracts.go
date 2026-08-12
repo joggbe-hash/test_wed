@@ -8,6 +8,7 @@ const (
 	RawImagePrefix         = "raw/"
 	ProcessedImagePrefix   = "processed/"
 	MaxProcessedImageBytes = 16 << 20
+	MaxImagePixels         = 12_000_000
 
 	TaskProcessImagePost      = "process_image_post"
 	TaskDeleteImages          = "delete_images"

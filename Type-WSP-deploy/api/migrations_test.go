@@ -35,13 +35,32 @@ func TestImageStorageQuotaMigrationAddsPersistentAccounting(t *testing.T) {
 	}
 }
 
-func TestLatestMigrationAddsExpiringImageUploadReservations(t *testing.T) {
+func TestImageUploadReservationMigrationIsPresent(t *testing.T) {
+	items, err := loadMigrations("migrations/system")
+	if err != nil {
+		t.Fatalf("load system migrations: %v", err)
+	}
+	var migrationSQL string
+	for _, item := range items {
+		if strings.Contains(item.sql, "image_upload_reservations") {
+			migrationSQL = item.sql
+			break
+		}
+	}
+	for _, expected := range []string{"image_upload_reservations", "raw_keys", "reserved_bytes", "expires_at"} {
+		if !strings.Contains(migrationSQL, expected) {
+			t.Fatalf("image upload reservation migration does not add %s", expected)
+		}
+	}
+}
+
+func TestLatestMigrationAddsDurableImageDeletionOutbox(t *testing.T) {
 	items, err := loadMigrations("migrations/system")
 	if err != nil {
 		t.Fatalf("load system migrations: %v", err)
 	}
 	latest := items[len(items)-1]
-	for _, expected := range []string{"image_upload_reservations", "raw_keys", "reserved_bytes", "expires_at"} {
+	for _, expected := range []string{"image_deletion_jobs", "object_keys", "reserved_bytes", "processing_token", "processing_started_at"} {
 		if !strings.Contains(latest.sql, expected) {
 			t.Fatalf("latest migration %s does not add %s", latest.name, expected)
 		}

@@ -62,7 +62,7 @@ server {
     limit_conn perip 50;
 
     # --- 客戶端上傳限制 (社群服務要上傳圖片/影片,給大一點) ---
-    client_max_body_size 25m;
+    client_max_body_size 13m;
     client_body_timeout  60s;
     client_header_timeout 10s;
 

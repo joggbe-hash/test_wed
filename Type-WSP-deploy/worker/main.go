@@ -36,7 +36,8 @@ type EmailPayload struct {
 }
 
 type ImageDeletePayload struct {
-	Keys []string `json:"keys"`
+	JobID string   `json:"job_id,omitempty"`
+	Keys  []string `json:"keys,omitempty"`
 }
 
 func main() {
@@ -82,6 +83,7 @@ func main() {
 	}
 	defer systemPool.Close()
 	go runUploadReservationJanitor(ctx)
+	go runImageDeletionJanitor(ctx)
 
 	consumerName, err := os.Hostname()
 	if err != nil || consumerName == "" {

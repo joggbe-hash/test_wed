@@ -46,13 +46,8 @@ func (sender *SMTPMailSender) SendVerificationCode(ctx context.Context, recipien
 	if err != nil {
 		return fmt.Errorf("invalid sender address: %w", err)
 	}
-	if len(code) != 6 {
-		return fmt.Errorf("verification code must contain 6 digits")
-	}
-	for _, digit := range code {
-		if digit < '0' || digit > '9' {
-			return fmt.Errorf("verification code must contain 6 digits")
-		}
+	if !validVerificationEmailCode(code) {
+		return fmt.Errorf("verification code has an invalid format")
 	}
 
 	address := net.JoinHostPort(sender.host, fmt.Sprintf("%d", sender.port))
@@ -122,8 +117,33 @@ func (sender *SMTPMailSender) SendVerificationCode(ctx context.Context, recipien
 	return nil
 }
 
+func validVerificationEmailCode(code string) bool {
+	if len(code) == 6 {
+		for _, char := range code {
+			if char < '0' || char > '9' {
+				return false
+			}
+		}
+		return true
+	}
+	if len(code) != 16 {
+		return false
+	}
+	const registrationAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	for _, char := range code {
+		if !strings.ContainsRune(registrationAlphabet, char) {
+			return false
+		}
+	}
+	return true
+}
+
 func verificationEmailMessage(from, recipient, code string) string {
 	subject := mime.QEncoding.Encode("UTF-8", verificationEmailSubject)
+	expiryMessage := "此驗證碼將在 5 分鐘後失效。"
+	if len(code) == 16 {
+		expiryMessage = "此註冊驗證碼將在 24 小時後失效。"
+	}
 	lines := []string{
 		"From: " + from,
 		"To: " + recipient,
@@ -134,7 +154,7 @@ func verificationEmailMessage(from, recipient, code string) string {
 		"",
 		"你的驗證碼是：" + code,
 		"",
-		"此驗證碼將在 5 分鐘後失效。",
+		expiryMessage,
 		"如果不是你本人操作，請忽略這封信。",
 		"",
 	}

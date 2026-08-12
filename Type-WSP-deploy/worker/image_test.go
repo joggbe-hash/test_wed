@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
+	"errors"
 	"hash/crc32"
 	"image"
 	"image/color"
@@ -11,6 +13,46 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestExecuteImageDeletionJobCompletesOnlyAfterObjectsAreRemoved(t *testing.T) {
+	completed := false
+	released := false
+	err := executeImageDeletionJob(
+		context.Background(), "job-id", "token",
+		func(context.Context, string, string) ([]string, bool, error) {
+			return []string{"processed/example.jpg"}, true, nil
+		},
+		func(context.Context, ImageDeletePayload) error { return nil },
+		func(context.Context, string, string) error { completed = true; return nil },
+		func(context.Context, string, string) error { released = true; return nil },
+	)
+	if err != nil {
+		t.Fatalf("execute image deletion job: %v", err)
+	}
+	if !completed || released {
+		t.Fatalf("completed=%v released=%v, want true/false", completed, released)
+	}
+}
+
+func TestExecuteImageDeletionJobPreservesJobWhenObjectRemovalFails(t *testing.T) {
+	completed := false
+	released := false
+	err := executeImageDeletionJob(
+		context.Background(), "job-id", "token",
+		func(context.Context, string, string) ([]string, bool, error) {
+			return []string{"processed/example.jpg"}, true, nil
+		},
+		func(context.Context, ImageDeletePayload) error { return errors.New("object store unavailable") },
+		func(context.Context, string, string) error { completed = true; return nil },
+		func(context.Context, string, string) error { released = true; return nil },
+	)
+	if err == nil {
+		t.Fatal("expected object-removal failure")
+	}
+	if completed || !released {
+		t.Fatalf("completed=%v released=%v, want false/true", completed, released)
+	}
+}
 
 func TestReadRawImageAllowsLimitedData(t *testing.T) {
 	data := []byte("small image payload")
@@ -63,11 +105,11 @@ func TestResizeAndCompressAlwaysReencodesImage(t *testing.T) {
 	}
 }
 
-func TestResizeAndCompressRejectsImageAboveWorkingSetBudgetBeforeDecode(t *testing.T) {
+func TestResizeAndCompressRejectsImageAboveSharedPixelBudgetBeforeDecode(t *testing.T) {
 	input := pngWithDimensions(5000, 4000)
 	_, err := resizeAndCompress(input)
-	if err == nil || !strings.Contains(err.Error(), "working set") {
-		t.Fatalf("expected working-set rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "pixels") {
+		t.Fatalf("expected shared pixel-limit rejection, got %v", err)
 	}
 }
 

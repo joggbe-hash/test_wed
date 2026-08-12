@@ -26,7 +26,6 @@ import (
 const maxDimension = 4096
 const jpegQuality = 95
 const maxRawImageBytes = 8 << 20
-const maxImagePixels = 20_000_000
 const maxImageWorkingBytes = 192 << 20
 const maxDecodedSourceBytesPerPixel = 8
 const imageProcessingLease = 10 * time.Minute
@@ -293,8 +292,8 @@ func resizeAndCompress(data []byte) (*processedImage, error) {
 	if config.Width <= 0 || config.Height <= 0 {
 		return nil, fmt.Errorf("invalid image dimensions")
 	}
-	if int64(config.Width) > maxImagePixels/int64(config.Height) {
-		return nil, fmt.Errorf("image dimensions exceed %d pixels", maxImagePixels)
+	if int64(config.Width) > int64(contracts.MaxImagePixels)/int64(config.Height) {
+		return nil, fmt.Errorf("image dimensions exceed %d pixels", contracts.MaxImagePixels)
 	}
 
 	orientation := imageOrientation(data)

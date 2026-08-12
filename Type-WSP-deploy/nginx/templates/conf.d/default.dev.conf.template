@@ -28,7 +28,7 @@ server {
     add_header Content-Security-Policy "default-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; script-src 'self'; script-src-attr 'none'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; connect-src 'self' ws:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" always;
 
     limit_conn perip 50;
-    client_max_body_size 25m;
+    client_max_body_size 13m;
     client_body_timeout 60s;
     client_header_timeout 10s;
 

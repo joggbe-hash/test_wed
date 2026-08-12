@@ -56,9 +56,11 @@ Success `200`：`{ "message": string, "challenge_id": string }`
 
 可能錯誤：`400`、`429`、`500`、`503`。
 
-規則：驗證碼有效 5 分鐘、每個來源最多錯誤嘗試 5 次、每個 challenge 全域最多錯誤嘗試 20 次、重新寄送冷卻 1 分鐘。收件信箱寄送上限為每小時 5 次／每日 10 次，來源端上限為每小時 20 次／每日 50 次。每次寄送都會產生新的 `challenge_id` 與驗證碼，且舊 challenge 立即失效；challenge 全域錯誤次數耗盡時會原子失效，必須重新取得驗證碼。
+規則：註冊驗證碼有效 24 小時、每個來源最多錯誤嘗試 5 次、每個 challenge 全域最多錯誤嘗試 20 次、重新寄送冷卻 1 分鐘。收件信箱寄送上限為每小時 5 次／每日 10 次，來源端上限為每小時 20 次／每日 50 次。每次寄送會產生獨立的 `challenge_id` 與高熵驗證碼；新 challenge 不會使已寄達的舊 challenge 失效，錯誤嘗試額度耗盡也不會阻擋正確的高熵驗證碼。
 
 ### `POST /api/auth/register`
+
+Registration challenges use a 16-character uppercase Base32 code and expire after 24 hours. Each `challenge_id` remains independently usable until consumed or expired; sending a newer code does not invalidate an earlier delivered challenge. Recipient and source send quotas still apply. If a recipient quota or cooldown is reached while an unexpired challenge exists, `/api/auth/send-code` returns the latest challenge instead of replacing it.
 
 Request：
 
@@ -67,7 +69,7 @@ Request：
   "username": "Amy",
   "email": "amy@example.com",
   "password": "password1",
-  "code": "123456",
+  "code": "ABCDEFGHJKLMNPQR",
   "challenge_id": "adf04b8e-9ae7-4dd5-a924-0b299a5aa865"
 }
 ```
@@ -78,7 +80,7 @@ Success `201`：`{ "message": "registered", "user_id": 1 }`
 
 - username 為 2–20 個 Unicode 字元，不得包含空白或控制字元。
 - password 至少為 8 個 Unicode 字元、UTF-8 編碼不得超過 72 bytes，且至少包含一個字母與一個數字。
-- code 必須是 6 位數字。
+- code 必須是 16 位大寫 Base32 字元（排除易混淆的 `I`、`O`、`0`、`1`）。
 - challenge_id 必須是最近一次寄送驗證碼所回傳的 UUID，並與 email、code 一起驗證。
 
 ### `POST /api/auth/login`

@@ -154,6 +154,9 @@ func processTask(ctx context.Context, task Task) error {
 		if err := json.Unmarshal(task.Payload, &payload); err != nil {
 			return fmt.Errorf("decode ImageDeletePayload failed: %w", err)
 		}
+		if payload.JobID != "" {
+			return processImageDeletionJob(ctx, payload.JobID)
+		}
 		return deleteImages(ctx, payload)
 	case contracts.TaskSendVerificationEmail:
 		var payload EmailPayload

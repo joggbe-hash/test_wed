@@ -199,11 +199,11 @@ const {
             name="verification-code"
             type="text"
             class="reg-input"
-            placeholder="請輸入 6 位驗證碼"
+            placeholder="請輸入 16 位註冊驗證碼"
             autocomplete="one-time-code"
-            inputmode="numeric"
-            pattern="[0-9]{6}"
-            maxlength="6"
+            inputmode="text"
+            pattern="[A-HJ-NP-Z2-9]{16}"
+            maxlength="16"
             spellcheck="false"
           >
         </div>

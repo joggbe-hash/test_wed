@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"log"
 	"net/http"
@@ -35,21 +38,24 @@ type Post struct {
 }
 
 const (
-	maxPostBodyBytes                        = 25 << 20
+	maxPostBodyBytes                        = 13 << 20
 	maxPostContentRunes                     = 5000
-	maxMultipartMemory                      = 8 << 20
-	maxImageUploadSize                      = 8 << 20
+	maxMultipartMemory                      = 4 << 20
+	maxImageUploadSize                      = 3 << 20
 	maxImagesPerPost                        = 4
-	maxPendingImagePostsPerUser             = 4
+	maxConcurrentImageUploads               = 4
+	maxPendingImagePostsPerUser             = 1
 	maxPostsPerUser                         = 5000
 	maxImageStorageBytesPerUser       int64 = 1 << 30
 	contentQuotaAdvisoryLockNamespace       = 0x54575350
 )
 
 var (
-	errImagePostQuotaExceeded    = errors.New("too many pending image posts")
-	errImageStorageQuotaExceeded = errors.New("image storage quota exceeded")
-	errPostQuotaExceeded         = errors.New("post quota exceeded")
+	errImagePostQuotaExceeded       = errors.New("too many pending image posts")
+	errImageProcessingQuotaExceeded = errors.New("image processing quota exceeded")
+	errImageStorageQuotaExceeded    = errors.New("image storage quota exceeded")
+	errImagePixelsExceeded          = errors.New("image dimensions exceed processing limit")
+	errPostQuotaExceeded            = errors.New("post quota exceeded")
 )
 
 type postVisibility string
@@ -233,6 +239,11 @@ func handleCreatePost(w http.ResponseWriter, r *http.Request) {
 		createTextPost(ctx, w, user, body.Content, visibility)
 		return
 	}
+	if !imageUploadConcurrency.tryAcquire() {
+		writeJSON(w, http.StatusTooManyRequests, M{"error": "too many image uploads in progress; please try again later"})
+		return
+	}
+	defer imageUploadConcurrency.release()
 
 	files, uploadErr := parseImageFiles(r)
 	if uploadErr != nil {
@@ -277,12 +288,29 @@ func handleDeletePost(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	var imageURLRaw *string
+	var deletionJobID uuid.UUID
 	err = WithTx(ctx, systemPool, func(tx pgx.Tx) error {
+		var reservedBytes int64
 		if err := tx.QueryRow(ctx,
-			"SELECT image_url FROM posts WHERE id = $1 AND user_id = $2 FOR UPDATE",
+			"SELECT image_url, image_reserved_bytes + image_storage_bytes FROM posts WHERE id = $1 AND user_id = $2 FOR UPDATE",
 			postID, user.ID,
-		).Scan(&imageURLRaw); err != nil {
+		).Scan(&imageURLRaw, &reservedBytes); err != nil {
 			return err
+		}
+		imageKeys := managedImageKeys(imageURLRaw)
+		if len(imageKeys) > 0 {
+			encodedKeys, err := json.Marshal(imageKeys)
+			if err != nil {
+				return err
+			}
+			deletionJobID = uuid.New()
+			if _, err := tx.Exec(ctx,
+				`INSERT INTO image_deletion_jobs (id, user_id, object_keys, reserved_bytes)
+				 VALUES ($1, $2, $3, $4)`,
+				deletionJobID, user.ID, encodedKeys, reservedBytes,
+			); err != nil {
+				return err
+			}
 		}
 		_, err := tx.Exec(ctx, "DELETE FROM posts WHERE id = $1 AND user_id = $2", postID, user.ID)
 		return err
@@ -296,11 +324,11 @@ func handleDeletePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	imageKeys := managedImageKeys(imageURLRaw)
-	if len(imageKeys) > 0 {
-		if err := enqueueTask(ctx, contracts.TaskDeleteImages, M{"keys": imageKeys}); err != nil {
+	if deletionJobID != uuid.Nil {
+		enqueueCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if err := enqueueTask(enqueueCtx, contracts.TaskDeleteImages, M{"job_id": deletionJobID.String()}); err != nil {
 			log.Printf("enqueue image cleanup failed for post %d: %v", postID, err)
-			removeImagesBestEffort(ctx, imageKeys)
 		}
 	}
 
@@ -355,6 +383,7 @@ func removeImagesBestEffort(ctx context.Context, keys []string) {
 type fileEntry struct {
 	reader      io.ReadCloser
 	size        int64
+	pixels      int64
 	contentType string
 	extension   string
 }
@@ -409,6 +438,15 @@ func parseImageFiles(r *http.Request) ([]*fileEntry, *uploadValidationError) {
 			closeFileEntries(files)
 			return nil, &uploadValidationError{status: http.StatusBadRequest, message: "unsupported image file"}
 		}
+		pixels, err := imageFilePixelCount(f)
+		if err != nil {
+			f.Close()
+			closeFileEntries(files)
+			if errors.Is(err, errImagePixelsExceeded) {
+				return nil, &uploadValidationError{status: http.StatusRequestEntityTooLarge, message: "image dimensions are too large"}
+			}
+			return nil, &uploadValidationError{status: http.StatusBadRequest, message: "invalid image file"}
+		}
 		if _, err := f.Seek(0, io.SeekStart); err != nil {
 			f.Close()
 			closeFileEntries(files)
@@ -418,12 +456,35 @@ func parseImageFiles(r *http.Request) ([]*fileEntry, *uploadValidationError) {
 		files = append(files, &fileEntry{
 			reader:      f,
 			size:        fh.Size,
+			pixels:      pixels,
 			contentType: contentType,
 			extension:   extension,
 		})
 	}
 
 	return files, nil
+}
+
+func imageFilePixelCount(file io.ReadSeeker) (int64, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return 0, fmt.Errorf("rewind image for dimension check: %w", err)
+	}
+	config, _, err := image.DecodeConfig(file)
+	if err != nil {
+		return 0, fmt.Errorf("decode image dimensions: %w", err)
+	}
+	pixels, ok := validatedImagePixelCount(config.Width, config.Height)
+	if !ok {
+		return 0, errImagePixelsExceeded
+	}
+	return pixels, nil
+}
+
+func validatedImagePixelCount(width, height int) (int64, bool) {
+	if width <= 0 || height <= 0 || int64(width) > int64(contracts.MaxImagePixels)/int64(height) {
+		return 0, false
+	}
+	return int64(width) * int64(height), true
 }
 
 func closeFileEntries(files []*fileEntry) {
@@ -548,6 +609,22 @@ func createImagePost(ctx context.Context, w http.ResponseWriter, user *User, con
 		return deleteImageUploadReservation(cleanupCtx, reservation.ID, user.ID)
 	})
 
+	processingPixels := imageProcessingPixels(files)
+	if err := reserveImageProcessingBudget(ctx, user.ID, processingPixels); err != nil {
+		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
+			log.Printf("rollback rejected image processing reservation failed: %v", rollbackErr)
+		}
+		if errors.Is(err, errImageProcessingQuotaExceeded) {
+			writeJSON(w, http.StatusTooManyRequests, M{"error": "image processing quota exceeded; please try again later"})
+			return
+		}
+		writeJSON(w, http.StatusServiceUnavailable, M{"error": "image processing admission unavailable"})
+		return
+	}
+	ops.Add("release image processing budget", func(cleanupCtx context.Context) error {
+		return releaseImageProcessingBudget(cleanupCtx, user.ID, processingPixels)
+	})
+
 	for index, f := range files {
 		rawKey := rawKeys[index]
 		_, err := minioClient.PutObject(ctx, minioBucket, rawKey, f.reader, f.size,
@@ -610,6 +687,17 @@ func imageStorageReservation(imageCount int) int64 {
 		return 0
 	}
 	return int64(imageCount) * int64(contracts.MaxProcessedImageBytes)
+}
+
+func imageProcessingPixels(files []*fileEntry) int64 {
+	var total int64
+	for _, file := range files {
+		if file == nil || file.pixels <= 0 || total > maxImageProcessingPixelsPerUserWindow-file.pixels {
+			return 0
+		}
+		total += file.pixels
+	}
+	return total
 }
 
 func hasImageStorageCapacity(currentBytes, reservationBytes int64) bool {

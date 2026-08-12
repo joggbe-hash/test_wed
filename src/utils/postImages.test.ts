@@ -25,13 +25,13 @@ describe('validatePostImages', () => {
     expect(result.errorMessage).toContain('JPEG 或 PNG')
   })
 
-  it('rejects files larger than eight MiB', () => {
+  it('rejects files larger than three MiB', () => {
     const result = validatePostImages([
       image('large.png', 'image/png', maxPostImageBytes + 1),
     ])
 
     expect(result.accepted).toEqual([])
-    expect(result.errorMessage).toContain('8 MiB')
+    expect(result.errorMessage).toContain('3 MiB')
   })
 
   it('rejects more than four files', () => {
@@ -40,4 +40,3 @@ describe('validatePostImages', () => {
     expect(validatePostImages(files).errorMessage).toContain('最多')
   })
 })
-

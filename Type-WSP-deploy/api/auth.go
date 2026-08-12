@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base32"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -26,50 +27,55 @@ import (
 )
 
 const (
-	codePrefix                          = "vcode:"
-	verificationActivePrefix            = "vcode:active:"
-	verificationAttemptsPrefix          = "vcode:attempts:challenge:"
-	verificationClientAttemptsPrefix    = "vcode:attempts:client:"
-	verificationSendCooldownPrefix      = "vcode:send-cooldown:"
-	verificationSendHourlyPrefix        = "vcode:send-hourly:"
-	verificationSendDailyPrefix         = "vcode:send-daily:"
-	verificationClientSendHourlyPrefix  = "vcode:send-client-hourly:"
-	verificationClientSendDailyPrefix   = "vcode:send-client-daily:"
-	codeTTL                             = 5 * time.Minute
-	verificationCodeAttemptLimit        = 5
-	verificationChallengeAttemptLimit   = 20
-	verificationCodeSendCooldown        = time.Minute
-	verificationCodeHourlySendLimit     = 5
-	verificationCodeDailySendLimit      = 10
-	verificationClientHourlySendLimit   = 20
-	verificationClientDailySendLimit    = 50
-	loginAttemptPrefix                  = "login:attempts:"
-	accountLoginAttemptPrefix           = "login:account-attempts:"
-	loginVerificationCodePrefix         = "login:vcode:"
-	loginVerificationActivePrefix       = "login:vcode:active:"
-	loginVerificationAttemptsPrefix     = "login:vcode:attempts:challenge:"
-	loginVerificationClientPrefix       = "login:vcode:attempts:client:"
-	loginVerificationSendCooldownPrefix = "login:vcode:send-cooldown:"
-	loginVerificationSendHourlyPrefix   = "login:vcode:send-hourly:"
-	loginVerificationSendDailyPrefix    = "login:vcode:send-daily:"
-	loginVerificationClientHourlyPrefix = "login:vcode:send-client-hourly:"
-	loginVerificationClientDailyPrefix  = "login:vcode:send-client-daily:"
-	loginAttemptLimit                   = 10
-	loginAttemptWindow                  = 5 * time.Minute
-	accountLoginAttemptLimit            = 25
-	accountLoginAttemptWindow           = 15 * time.Minute
-	rememberSessionTTL                  = 30 * 24 * time.Hour
-	maxAuthRequestBytes                 = 64 << 10
-	minUsernameRunes                    = 2
-	maxUsernameRunes                    = 20
-	minPasswordRunes                    = 8
-	maxPasswordBytes                    = 72
+	codePrefix                              = "vcode:"
+	verificationActivePrefix                = "vcode:active:"
+	verificationAttemptsPrefix              = "vcode:attempts:challenge:"
+	verificationClientAttemptsPrefix        = "vcode:attempts:client:"
+	verificationSendCooldownPrefix          = "vcode:send-cooldown:"
+	verificationSendHourlyPrefix            = "vcode:send-hourly:"
+	verificationSendDailyPrefix             = "vcode:send-daily:"
+	verificationClientSendHourlyPrefix      = "vcode:send-client-hourly:"
+	verificationClientSendDailyPrefix       = "vcode:send-client-daily:"
+	codeTTL                                 = 5 * time.Minute
+	registrationCodeTTL                     = 24 * time.Hour
+	registrationVerificationCodeLength      = 16
+	registrationVerificationCodeAlphabet    = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	verificationCodeAttemptLimit            = 5
+	verificationChallengeAttemptLimit       = 20
+	verificationCodeSendCooldown            = time.Minute
+	verificationCodeHourlySendLimit         = 5
+	verificationCodeDailySendLimit          = 10
+	verificationClientHourlySendLimit       = 20
+	verificationClientDailySendLimit        = 50
+	loginAttemptPrefix                      = "login:attempts:"
+	accountLoginAttemptPrefix               = "login:account-attempts:"
+	loginVerificationCodePrefix             = "login:vcode:"
+	loginVerificationActivePrefix           = "login:vcode:active:"
+	loginVerificationAttemptsPrefix         = "login:vcode:attempts:challenge:"
+	loginVerificationClientPrefix           = "login:vcode:attempts:client:"
+	loginVerificationSendCooldownPrefix     = "login:vcode:send-cooldown:"
+	loginVerificationSendHourlyPrefix       = "login:vcode:send-hourly:"
+	loginVerificationSendDailyPrefix        = "login:vcode:send-daily:"
+	loginVerificationClientHourlyPrefix     = "login:vcode:send-client-hourly:"
+	loginVerificationClientDailyPrefix      = "login:vcode:send-client-daily:"
+	loginAttemptLimit                       = 10
+	loginAttemptWindow                      = 5 * time.Minute
+	accountLoginAttemptLimit                = 25
+	accountLoginAttemptWindow               = 15 * time.Minute
+	maxConcurrentLoginPasswordVerifications = 4
+	rememberSessionTTL                      = 30 * 24 * time.Hour
+	maxAuthRequestBytes                     = 64 << 10
+	minUsernameRunes                        = 2
+	maxUsernameRunes                        = 20
+	minPasswordRunes                        = 8
+	maxPasswordBytes                        = 72
 )
 
 var (
-	debugVerificationCode  bool
-	sessionCookieSecure    = true
-	dummyLoginPasswordHash = []byte("$2a$12$hVErFRzichm5h6hlc/CBx.97BpxRbUaDSfkqS5dBrr06P0Yd48E0q")
+	debugVerificationCode                bool
+	sessionCookieSecure                  = true
+	dummyLoginPasswordHash               = []byte("$2a$12$hVErFRzichm5h6hlc/CBx.97BpxRbUaDSfkqS5dBrr06P0Yd48E0q")
+	loginPasswordVerificationConcurrency = newConcurrencyLimiter(maxConcurrentLoginPasswordVerifications)
 )
 
 var (
@@ -135,6 +141,13 @@ if redis.call('GET', KEYS[2]) == ARGV[1] then
 end
 return 1
 `)
+	rollbackRegistrationChallengeScript = redis.NewScript(`
+redis.call('DEL', KEYS[1])
+if redis.call('GET', KEYS[2]) == ARGV[1] then
+  redis.call('DEL', KEYS[2])
+end
+return 1
+`)
 	consumeVerificationCodeScript = redis.NewScript(`
 local storedCode = redis.call('GET', KEYS[1])
 local activeChallenge = redis.call('GET', KEYS[2])
@@ -170,15 +183,52 @@ if clientAttempts >= tonumber(ARGV[3]) then
 end
 return 0
 `)
-	consumeLoginAttemptScript = redis.NewScript(`
-for i = 1, 2 do
-  local attempts = redis.call('INCR', KEYS[i])
-  local ttl = redis.call('PTTL', KEYS[i])
-  if attempts == 1 or ttl < 0 then
-    redis.call('PEXPIRE', KEYS[i], ARGV[i])
-  end
+	consumeRegistrationCodeScript = redis.NewScript(`
+local storedCode = redis.call('GET', KEYS[1])
+if not storedCode then
+  return -1
 end
-return 1
+if storedCode == ARGV[2] then
+  redis.call('DEL', KEYS[1], KEYS[3], KEYS[4])
+  if redis.call('GET', KEYS[2]) == ARGV[1] then
+    redis.call('DEL', KEYS[2])
+  end
+  return 1
+end
+local clientAttempts = tonumber(redis.call('GET', KEYS[3]) or '0')
+local challengeAttempts = tonumber(redis.call('GET', KEYS[4]) or '0')
+if clientAttempts >= tonumber(ARGV[3]) or challengeAttempts >= tonumber(ARGV[4]) then
+  return 2
+end
+local ttl = redis.call('PTTL', KEYS[1])
+clientAttempts = redis.call('INCR', KEYS[3])
+challengeAttempts = redis.call('INCR', KEYS[4])
+if ttl > 0 then
+  if clientAttempts == 1 then redis.call('PEXPIRE', KEYS[3], ttl) end
+  if challengeAttempts == 1 then redis.call('PEXPIRE', KEYS[4], ttl) end
+end
+if clientAttempts >= tonumber(ARGV[3]) or challengeAttempts >= tonumber(ARGV[4]) then
+  return 2
+end
+return 0
+`)
+	reserveLoginAttemptScript = redis.NewScript(`
+local clientAttempts = tonumber(redis.call('GET', KEYS[1]) or '0')
+local accountAttempts = tonumber(redis.call('GET', KEYS[2]) or '0')
+if clientAttempts >= tonumber(ARGV[3]) then
+  return {0, clientAttempts, accountAttempts}
+end
+clientAttempts = redis.call('INCR', KEYS[1])
+if accountAttempts < tonumber(ARGV[4]) then
+  accountAttempts = redis.call('INCR', KEYS[2])
+end
+if clientAttempts == 1 or redis.call('PTTL', KEYS[1]) < 0 then
+  redis.call('PEXPIRE', KEYS[1], ARGV[1])
+end
+if accountAttempts == 1 or redis.call('PTTL', KEYS[2]) < 0 then
+  redis.call('PEXPIRE', KEYS[2], ARGV[2])
+end
+return {1, clientAttempts, accountAttempts}
 `)
 )
 
@@ -193,6 +243,24 @@ func generateVerificationCode() (string, error) {
 		return "", fmt.Errorf("generate verification code failed: %w", err)
 	}
 	return fmt.Sprintf("%06d", value.Int64()), nil
+}
+
+func generateRegistrationVerificationCode() (string, error) {
+	raw := make([]byte, 10)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate registration verification code failed: %w", err)
+	}
+	encoding := base32.NewEncoding(registrationVerificationCodeAlphabet).WithPadding(base32.NoPadding)
+	return encoding.EncodeToString(raw), nil
+}
+
+func validRegistrationVerificationCode(code string) bool {
+	if len(code) != registrationVerificationCodeLength {
+		return false
+	}
+	return strings.IndexFunc(code, func(char rune) bool {
+		return !strings.ContainsRune(registrationVerificationCodeAlphabet, char)
+	}) < 0
 }
 
 func verificationCodeResponse(challengeID, code string) M {
@@ -222,11 +290,11 @@ func hashedEmailKey(prefix, email string) string {
 	return prefix + hex.EncodeToString(digest[:])
 }
 
-func verificationCodeKey(email string) string {
-	return hashedEmailKey(codePrefix, email)
+func verificationCodeKey(email, challengeID string) string {
+	return hashedValueKey(codePrefix, strings.ToLower(strings.TrimSpace(email))+"\x00"+challengeID)
 }
 
-func verificationActiveChallengeKey(email string) string {
+func verificationLatestChallengeKey(email string) string {
 	return hashedEmailKey(verificationActivePrefix, email)
 }
 
@@ -313,22 +381,6 @@ func loginAttemptAllowed(attempts int64) bool {
 	return attempts > 0 && attempts <= loginAttemptLimit
 }
 
-func loadLoginAttempts(ctx context.Context, email, clientIdentity string) (int64, int64, error) {
-	values, err := rdb.MGet(ctx, loginAttemptKey(email, clientIdentity), accountLoginAttemptKey(email)).Result()
-	if err != nil {
-		return 0, 0, fmt.Errorf("load login attempts failed: %w", err)
-	}
-	clientAttempts, err := redisCounter(values[0])
-	if err != nil {
-		return 0, 0, fmt.Errorf("decode client login attempts failed: %w", err)
-	}
-	accountAttempts, err := redisCounter(values[1])
-	if err != nil {
-		return 0, 0, fmt.Errorf("decode account login attempts failed: %w", err)
-	}
-	return clientAttempts, accountAttempts, nil
-}
-
 func redisCounter(value any) (int64, error) {
 	if value == nil {
 		return 0, nil
@@ -345,18 +397,38 @@ func redisCounter(value any) (int64, error) {
 	}
 }
 
-func recordFailedLoginAttempt(ctx context.Context, email, clientIdentity string) (int64, int64, error) {
-	err := consumeLoginAttemptScript.Run(
+func reserveLoginAttempt(ctx context.Context, email, clientIdentity string) (bool, int64, int64, error) {
+	values, err := reserveLoginAttemptScript.Run(
 		ctx,
 		rdb,
 		[]string{loginAttemptKey(email, clientIdentity), accountLoginAttemptKey(email)},
 		loginAttemptWindow.Milliseconds(),
 		accountLoginAttemptWindow.Milliseconds(),
-	).Err()
+		loginAttemptLimit,
+		accountLoginAttemptLimit,
+	).Slice()
 	if err != nil {
-		return 0, 0, fmt.Errorf("record login attempt failed: %w", err)
+		return false, 0, 0, fmt.Errorf("reserve login attempt failed: %w", err)
 	}
-	return loadLoginAttempts(ctx, email, clientIdentity)
+	if len(values) != 3 {
+		return false, 0, 0, fmt.Errorf("reserve login attempt returned %d values", len(values))
+	}
+	reserved, err := redisCounter(values[0])
+	if err != nil {
+		return false, 0, 0, fmt.Errorf("decode login reservation result: %w", err)
+	}
+	clientAttempts, err := redisCounter(values[1])
+	if err != nil {
+		return false, 0, 0, fmt.Errorf("decode client login attempts: %w", err)
+	}
+	accountAttempts, err := redisCounter(values[2])
+	if err != nil {
+		return false, 0, 0, fmt.Errorf("decode account login attempts: %w", err)
+	}
+	if reserved == 0 && !loginPreAuthenticationShouldBlock(clientAttempts, accountAttempts) {
+		return false, 0, 0, fmt.Errorf("login reservation rejected below configured limits")
+	}
+	return reserved == 1, clientAttempts, accountAttempts, nil
 }
 
 func loginAttemptShouldBlock(attempts int64) bool {
@@ -368,8 +440,8 @@ func accountLoginAttemptShouldBlock(attempts int64) bool {
 }
 
 func loginPreAuthenticationShouldBlock(clientAttempts, _ int64) bool {
-	// Account-wide failures remain a risk signal. They must not let an attacker
-	// block a correct password before the mandatory email verification step.
+	// Account-wide failures remain a risk signal for rejecting wrong passwords,
+	// but cannot stop a clean source from proving the password and entering OTP.
 	return loginAttemptShouldBlock(clientAttempts)
 }
 
@@ -479,10 +551,10 @@ func activateVerificationChallenge(ctx context.Context, email, challengeID, code
 	return activateVerificationChallengeScript.Run(
 		ctx,
 		rdb,
-		[]string{verificationCodeKey(email), verificationActiveChallengeKey(email)},
+		[]string{verificationCodeKey(email, challengeID), verificationLatestChallengeKey(email)},
 		code,
 		challengeID,
-		codeTTL.Milliseconds(),
+		registrationCodeTTL.Milliseconds(),
 	).Err()
 }
 
@@ -507,21 +579,21 @@ func rollbackLoginVerificationChallenge(ctx context.Context, email, challengeID 
 }
 
 func rollbackVerificationChallenge(ctx context.Context, email, challengeID string) error {
-	return rollbackVerificationChallengeScript.Run(
+	return rollbackRegistrationChallengeScript.Run(
 		ctx,
 		rdb,
-		[]string{verificationCodeKey(email), verificationActiveChallengeKey(email)},
+		[]string{verificationCodeKey(email, challengeID), verificationLatestChallengeKey(email)},
 		challengeID,
 	).Err()
 }
 
 func consumeVerificationCode(ctx context.Context, email, challengeID, clientIdentity, candidate string) (verificationResult, error) {
-	result, err := consumeVerificationCodeScript.Run(
+	result, err := consumeRegistrationCodeScript.Run(
 		ctx,
 		rdb,
 		[]string{
-			verificationCodeKey(email),
-			verificationActiveChallengeKey(email),
+			verificationCodeKey(email, challengeID),
+			verificationLatestChallengeKey(email),
 			verificationClientAttemptKey(challengeID, clientIdentity),
 			verificationChallengeAttemptKey(challengeID),
 		},
@@ -618,7 +690,7 @@ func limitAuthRequestBody(w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAuthRequestBytes)
 }
 
-// handleSendCode 產生 6 位數驗證碼，先放 Redis，再推送 email job 給 worker。
+// handleSendCode 產生高熵註冊驗證碼，先放 Redis，再推送 email job 給 worker。
 // debug_code 僅能在明確的 development 設定下回傳，部署環境預設不暴露。
 func handleSendCode(w http.ResponseWriter, r *http.Request) {
 	limitAuthRequestBody(w, r)
@@ -642,11 +714,17 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if reservation < 0 {
+		challengeID, latestErr := rdb.Get(ctx, verificationLatestChallengeKey(email)).Result()
+		if latestErr == nil {
+			code, _ := rdb.Get(ctx, verificationCodeKey(email, challengeID)).Result()
+			writeJSON(w, http.StatusOK, verificationCodeResponse(challengeID, code))
+			return
+		}
 		writeJSON(w, http.StatusTooManyRequests, M{"error": "please wait before requesting another verification code"})
 		return
 	}
 
-	code, err := generateVerificationCode()
+	code, err := generateRegistrationVerificationCode()
 	if err != nil {
 		_ = rollbackVerificationSend(ctx, email, clientIdentity)
 		writeJSON(w, http.StatusInternalServerError, M{"error": "generate verification code failed"})
@@ -720,8 +798,9 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, M{"error": err.Error()})
 		return
 	}
-	if len(req.Code) != 6 || strings.IndexFunc(req.Code, func(char rune) bool { return !unicode.IsDigit(char) }) >= 0 {
-		writeJSON(w, http.StatusBadRequest, M{"error": "驗證碼必須為 6 位數字"})
+	req.Code = strings.ToUpper(strings.TrimSpace(req.Code))
+	if !validRegistrationVerificationCode(req.Code) {
+		writeJSON(w, http.StatusBadRequest, M{"error": "註冊驗證碼必須為 16 位大寫 Base32 字元"})
 		return
 	}
 	if _, err := uuid.Parse(req.ChallengeID); err != nil {
@@ -824,15 +903,20 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	clientIdentity := requestClientIdentity(r)
-	clientAttempts, accountAttempts, err := loadLoginAttempts(ctx, email, clientIdentity)
+	reserved, clientAttempts, accountAttempts, err := reserveLoginAttempt(ctx, email, clientIdentity)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
 		return
 	}
-	if loginPreAuthenticationShouldBlock(clientAttempts, accountAttempts) {
+	if !reserved {
 		writeJSON(w, http.StatusTooManyRequests, M{"error": "too many login attempts; please try again later"})
 		return
 	}
+	if !loginPasswordVerificationConcurrency.tryAcquire() {
+		writeJSON(w, http.StatusTooManyRequests, M{"error": "authentication service is busy; please try again"})
+		return
+	}
+	defer loginPasswordVerificationConcurrency.release()
 
 	var user User
 	var passwordHash string
@@ -846,12 +930,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	passwordMatches := verifyLoginPassword(passwordHash, req.Password)
 	if !passwordMatches {
-		clientAttempts, accountAttempts, attemptErr := recordFailedLoginAttempt(ctx, email, clientIdentity)
-		if attemptErr != nil {
-			writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
-			return
-		}
-		if !loginAttemptAllowed(clientAttempts) || accountAttempts > accountLoginAttemptLimit {
+		if !loginAttemptAllowed(clientAttempts) || accountAttempts >= accountLoginAttemptLimit {
 			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many login attempts; please try again later"})
 			return
 		}

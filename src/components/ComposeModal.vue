@@ -206,7 +206,7 @@ onBeforeUnmount(() => {
               class="sr-only"
               :accept="acceptedPostImageInput"
               multiple
-              aria-label="選擇最多四張貼文圖片"
+              :aria-label="`選擇最多 ${maxPostImages} 張貼文圖片`"
               @change="handleImageChange"
             >
             <button type="button" aria-label="GIF"><span>GIF</span></button>

@@ -45,7 +45,8 @@ func reserveImageUpload(ctx context.Context, userID, imageCount int, rawKeys []s
 			    (SELECT COUNT(*) FROM posts WHERE user_id = $1 AND image_status = 'processing')
 			      + (SELECT COUNT(*) FROM image_upload_reservations WHERE user_id = $1 AND expires_at > $2),
 			    COALESCE((SELECT SUM(image_reserved_bytes + image_storage_bytes) FROM posts WHERE user_id = $1), 0)
-			      + COALESCE((SELECT SUM(reserved_bytes) FROM image_upload_reservations WHERE user_id = $1 AND expires_at > $2), 0)`,
+			      + COALESCE((SELECT SUM(reserved_bytes) FROM image_upload_reservations WHERE user_id = $1 AND expires_at > $2), 0)
+			      + COALESCE((SELECT SUM(reserved_bytes) FROM image_deletion_jobs WHERE user_id = $1), 0)`,
 			userID, now,
 		).Scan(&total, &pending, &storedAndReserved); err != nil {
 			return err

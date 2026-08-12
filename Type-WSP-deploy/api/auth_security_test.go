@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 
@@ -82,11 +83,62 @@ func TestLoginAttemptPolicyBlocksAttemptsPastTheAccountLimit(t *testing.T) {
 }
 
 func TestLoginPreAuthenticationBlockUsesOnlyClientBudget(t *testing.T) {
-	if !loginPreAuthenticationShouldBlock(loginAttemptLimit+1, 0) {
+	if !loginPreAuthenticationShouldBlock(loginAttemptLimit, 0) {
 		t.Fatal("login was allowed after the client failure budget was exhausted")
 	}
 	if loginPreAuthenticationShouldBlock(0, accountLoginAttemptLimit) {
-		t.Fatal("account-wide risk blocked a clean client before password verification")
+		t.Fatal("an attacker exhausted the account-wide signal and locked out a clean client")
+	}
+	if loginPreAuthenticationShouldBlock(loginAttemptLimit-1, accountLoginAttemptLimit+1) {
+		t.Fatal("account-wide risk signal became a pre-authentication account lock")
+	}
+}
+
+func TestRegistrationVerificationCodeHasAtLeastEightyBitsOfEntropy(t *testing.T) {
+	code, err := generateRegistrationVerificationCode()
+	if err != nil {
+		t.Fatalf("generate registration verification code: %v", err)
+	}
+	if len(code) != registrationVerificationCodeLength {
+		t.Fatalf("code length = %d, want %d", len(code), registrationVerificationCodeLength)
+	}
+	if !validRegistrationVerificationCode(code) {
+		t.Fatalf("generated code is outside the registration alphabet: %q", code)
+	}
+}
+
+func TestLoginPasswordVerificationLimiterBoundsExpensiveWork(t *testing.T) {
+	limiter := newConcurrencyLimiter(2)
+	if !limiter.tryAcquire() || !limiter.tryAcquire() {
+		t.Fatal("limiter rejected work below its capacity")
+	}
+	if limiter.tryAcquire() {
+		t.Fatal("limiter admitted bcrypt work above its capacity")
+	}
+	limiter.release()
+	if !limiter.tryAcquire() {
+		t.Fatal("limiter did not restore capacity after release")
+	}
+}
+
+func TestLoginAtomicallyReservesAttemptBeforePasswordVerification(t *testing.T) {
+	source, err := os.ReadFile("auth.go")
+	if err != nil {
+		t.Fatalf("read auth.go: %v", err)
+	}
+	handlerStart := bytes.Index(source, []byte("func handleLogin("))
+	if handlerStart < 0 {
+		t.Fatal("handleLogin source was not found")
+	}
+	handlerEnd := bytes.Index(source[handlerStart:], []byte("\ntype loginVerificationRequest struct"))
+	if handlerEnd < 0 {
+		t.Fatal("handleLogin end was not found")
+	}
+	handler := source[handlerStart : handlerStart+handlerEnd]
+	reserveAt := bytes.Index(handler, []byte("reserveLoginAttempt("))
+	passwordAt := bytes.Index(handler, []byte("verifyLoginPassword("))
+	if reserveAt < 0 || passwordAt < 0 || reserveAt > passwordAt {
+		t.Fatal("login attempt budget is not atomically reserved before password verification")
 	}
 }
 
@@ -94,10 +146,10 @@ func TestLoginVerificationKeysAreIsolatedFromRegistration(t *testing.T) {
 	email := "user@example.com"
 	challengeID := "69ca80a8-e3be-4dbf-8a4b-6600146f5574"
 
-	if loginVerificationCodeKey(email) == verificationCodeKey(email) {
+	if loginVerificationCodeKey(email) == verificationCodeKey(email, challengeID) {
 		t.Fatal("login and registration shared a verification-code key")
 	}
-	if loginVerificationActiveChallengeKey(email) == verificationActiveChallengeKey(email) {
+	if loginVerificationActiveChallengeKey(email) == verificationLatestChallengeKey(email) {
 		t.Fatal("login and registration shared an active-challenge key")
 	}
 	if loginVerificationChallengeAttemptKey(challengeID) == verificationChallengeAttemptKey(challengeID) {

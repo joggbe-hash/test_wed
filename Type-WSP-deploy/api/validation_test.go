@@ -75,8 +75,8 @@ func TestDecodeFeedCursorRejectsMalformedValues(t *testing.T) {
 }
 
 func TestPostLimits(t *testing.T) {
-	if maxPostBodyBytes != 25<<20 {
-		t.Fatalf("maxPostBodyBytes = %d, want 25 MiB", maxPostBodyBytes)
+	if maxPostBodyBytes != 13<<20 {
+		t.Fatalf("maxPostBodyBytes = %d, want 13 MiB", maxPostBodyBytes)
 	}
 	if validPostContent(strings.Repeat("文", maxPostContentRunes+1)) {
 		t.Fatal("oversized post content was accepted")
