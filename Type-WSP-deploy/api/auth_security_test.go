@@ -82,15 +82,15 @@ func TestLoginAttemptPolicyBlocksAttemptsPastTheAccountLimit(t *testing.T) {
 	}
 }
 
-func TestLoginPreAuthenticationBlockUsesOnlyClientBudget(t *testing.T) {
+func TestLoginPreAuthenticationBlockUsesClientAndAccountBudgets(t *testing.T) {
 	if !loginPreAuthenticationShouldBlock(loginAttemptLimit, 0) {
 		t.Fatal("login was allowed after the client failure budget was exhausted")
 	}
-	if loginPreAuthenticationShouldBlock(0, accountLoginAttemptLimit) {
-		t.Fatal("an attacker exhausted the account-wide signal and locked out a clean client")
+	if !loginPreAuthenticationShouldBlock(0, accountLoginAttemptLimit) {
+		t.Fatal("login was allowed after the account failure budget was exhausted")
 	}
-	if loginPreAuthenticationShouldBlock(loginAttemptLimit-1, accountLoginAttemptLimit+1) {
-		t.Fatal("account-wide risk signal became a pre-authentication account lock")
+	if loginPreAuthenticationShouldBlock(loginAttemptLimit-1, accountLoginAttemptLimit-1) {
+		t.Fatal("login was blocked before either failure budget was exhausted")
 	}
 }
 

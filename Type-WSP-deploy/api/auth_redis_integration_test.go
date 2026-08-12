@@ -169,7 +169,7 @@ func TestRedisVerificationSendBudgetHasCumulativeHourlyBound(t *testing.T) {
 	}
 }
 
-func TestRedisAccountRiskSignalDoesNotLockOutCleanClient(t *testing.T) {
+func TestRedisAccountBudgetBlocksCleanClientBeforePasswordVerification(t *testing.T) {
 	useIntegrationRedis(t)
 	ctx := context.Background()
 	email := "user@example.com"
@@ -191,8 +191,8 @@ func TestRedisAccountRiskSignalDoesNotLockOutCleanClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bounded attempt: %v", err)
 	}
-	if !allowed || current != accountLoginAttemptLimit {
-		t.Fatalf("clean-client attempt after account signal = allowed %v, count %d", allowed, current)
+	if allowed || current != accountLoginAttemptLimit {
+		t.Fatalf("clean-client attempt after account exhaustion = allowed %v, count %d", allowed, current)
 	}
 }
 
@@ -227,8 +227,8 @@ func TestRedisLoginAccountBudgetIsAtomicAcrossConcurrentClients(t *testing.T) {
 			allowedCount++
 		}
 	}
-	if allowedCount != attempts {
-		t.Fatalf("concurrent clean clients allowed %d attempts, want %d", allowedCount, attempts)
+	if allowedCount != accountLoginAttemptLimit {
+		t.Fatalf("concurrent clean clients allowed %d attempts, want %d", allowedCount, accountLoginAttemptLimit)
 	}
 }
 

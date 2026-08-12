@@ -215,13 +215,11 @@ return 0
 	reserveLoginAttemptScript = redis.NewScript(`
 local clientAttempts = tonumber(redis.call('GET', KEYS[1]) or '0')
 local accountAttempts = tonumber(redis.call('GET', KEYS[2]) or '0')
-if clientAttempts >= tonumber(ARGV[3]) then
+if clientAttempts >= tonumber(ARGV[3]) or accountAttempts >= tonumber(ARGV[4]) then
   return {0, clientAttempts, accountAttempts}
 end
 clientAttempts = redis.call('INCR', KEYS[1])
-if accountAttempts < tonumber(ARGV[4]) then
-  accountAttempts = redis.call('INCR', KEYS[2])
-end
+accountAttempts = redis.call('INCR', KEYS[2])
 if clientAttempts == 1 or redis.call('PTTL', KEYS[1]) < 0 then
   redis.call('PEXPIRE', KEYS[1], ARGV[1])
 end
@@ -439,10 +437,8 @@ func accountLoginAttemptShouldBlock(attempts int64) bool {
 	return attempts >= accountLoginAttemptLimit
 }
 
-func loginPreAuthenticationShouldBlock(clientAttempts, _ int64) bool {
-	// Account-wide failures remain a risk signal for rejecting wrong passwords,
-	// but cannot stop a clean source from proving the password and entering OTP.
-	return loginAttemptShouldBlock(clientAttempts)
+func loginPreAuthenticationShouldBlock(clientAttempts, accountAttempts int64) bool {
+	return loginAttemptShouldBlock(clientAttempts) || accountLoginAttemptShouldBlock(accountAttempts)
 }
 
 func resetLoginAttempts(ctx context.Context, email, clientIdentity string) error {
