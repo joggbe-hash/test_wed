@@ -82,15 +82,15 @@ func TestLoginAttemptPolicyBlocksAttemptsPastTheAccountLimit(t *testing.T) {
 	}
 }
 
-func TestLoginPreAuthenticationBlockUsesClientAndAccountBudgets(t *testing.T) {
+func TestLoginPreAuthenticationBlockUsesOnlyClientBudget(t *testing.T) {
 	if !loginPreAuthenticationShouldBlock(loginAttemptLimit, 0) {
 		t.Fatal("login was allowed after the client failure budget was exhausted")
 	}
-	if !loginPreAuthenticationShouldBlock(0, accountLoginAttemptLimit) {
-		t.Fatal("login was allowed after the account failure budget was exhausted")
+	if loginPreAuthenticationShouldBlock(0, accountLoginAttemptLimit) {
+		t.Fatal("account-wide failures blocked a clean client before password verification")
 	}
-	if loginPreAuthenticationShouldBlock(loginAttemptLimit-1, accountLoginAttemptLimit-1) {
-		t.Fatal("login was blocked before either failure budget was exhausted")
+	if !accountLoginAttemptShouldBlock(accountLoginAttemptLimit) {
+		t.Fatal("account-wide failure budget was not retained for post-verification throttling")
 	}
 }
 
@@ -104,6 +104,27 @@ func TestRegistrationVerificationCodeHasAtLeastEightyBitsOfEntropy(t *testing.T)
 	}
 	if !validRegistrationVerificationCode(code) {
 		t.Fatalf("generated code is outside the registration alphabet: %q", code)
+	}
+}
+
+func TestRegistrationConsumeScriptRequiresLatestChallengeBeforeCodeMatch(t *testing.T) {
+	source, err := os.ReadFile("auth.go")
+	if err != nil {
+		t.Fatalf("read auth.go: %v", err)
+	}
+	scriptStart := bytes.Index(source, []byte("consumeRegistrationCodeScript = redis.NewScript(`"))
+	if scriptStart < 0 {
+		t.Fatal("registration consumption script was not found")
+	}
+	scriptEnd := bytes.Index(source[scriptStart:], []byte("\n`)"))
+	if scriptEnd < 0 {
+		t.Fatal("registration consumption script end was not found")
+	}
+	script := source[scriptStart : scriptStart+scriptEnd]
+	activeCheckAt := bytes.Index(script, []byte("activeChallenge ~= ARGV[1]"))
+	codeMatchAt := bytes.Index(script, []byte("storedCode == ARGV[2]"))
+	if activeCheckAt < 0 || codeMatchAt < 0 || activeCheckAt > codeMatchAt {
+		t.Fatal("registration code was matched before requiring the latest challenge")
 	}
 }
 

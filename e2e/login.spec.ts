@@ -108,7 +108,7 @@ test('user can request a verification code and register', async ({ page }) => {
   await page.route('**/api/auth/register', async (route) => {
     expect(await route.request().postDataJSON()).toEqual({
       email: 'new-user@example.com',
-      code: '123456',
+      code: 'ABCDEFGHJKLMNPQ2',
       username: '新使用者',
       password: 'Password1',
       challenge_id: 'register-challenge-1',
@@ -126,7 +126,7 @@ test('user can request a verification code and register', async ({ page }) => {
   await registerForm.getByLabel('電子信箱').fill('new-user@example.com')
   await registerForm.getByRole('button', { name: '取得驗證碼' }).click()
   await expect(registerForm.getByRole('status')).toContainText('驗證碼已送出')
-  await registerForm.getByLabel('驗證碼').fill('123456')
+  await registerForm.getByLabel('驗證碼').fill('ABCDEFGHJKLMNPQ2')
   await registerForm.getByLabel('使用者名稱').fill('新使用者')
   await registerForm.getByLabel('密碼', { exact: true }).fill('Password1')
   await registerForm.getByLabel('確認密碼').fill('Password1')

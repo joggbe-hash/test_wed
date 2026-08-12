@@ -185,14 +185,12 @@ return 0
 `)
 	consumeRegistrationCodeScript = redis.NewScript(`
 local storedCode = redis.call('GET', KEYS[1])
-if not storedCode then
+local activeChallenge = redis.call('GET', KEYS[2])
+if not storedCode or activeChallenge ~= ARGV[1] then
   return -1
 end
 if storedCode == ARGV[2] then
-  redis.call('DEL', KEYS[1], KEYS[3], KEYS[4])
-  if redis.call('GET', KEYS[2]) == ARGV[1] then
-    redis.call('DEL', KEYS[2])
-  end
+  redis.call('DEL', KEYS[1], KEYS[2], KEYS[3], KEYS[4])
   return 1
 end
 local clientAttempts = tonumber(redis.call('GET', KEYS[3]) or '0')
@@ -215,7 +213,7 @@ return 0
 	reserveLoginAttemptScript = redis.NewScript(`
 local clientAttempts = tonumber(redis.call('GET', KEYS[1]) or '0')
 local accountAttempts = tonumber(redis.call('GET', KEYS[2]) or '0')
-if clientAttempts >= tonumber(ARGV[3]) or accountAttempts >= tonumber(ARGV[4]) then
+if clientAttempts >= tonumber(ARGV[3]) then
   return {0, clientAttempts, accountAttempts}
 end
 clientAttempts = redis.call('INCR', KEYS[1])
@@ -437,8 +435,8 @@ func accountLoginAttemptShouldBlock(attempts int64) bool {
 	return attempts >= accountLoginAttemptLimit
 }
 
-func loginPreAuthenticationShouldBlock(clientAttempts, accountAttempts int64) bool {
-	return loginAttemptShouldBlock(clientAttempts) || accountLoginAttemptShouldBlock(accountAttempts)
+func loginPreAuthenticationShouldBlock(clientAttempts, _ int64) bool {
+	return loginAttemptShouldBlock(clientAttempts)
 }
 
 func resetLoginAttempts(ctx context.Context, email, clientIdentity string) error {
@@ -926,7 +924,7 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	passwordMatches := verifyLoginPassword(passwordHash, req.Password)
 	if !passwordMatches {
-		if !loginAttemptAllowed(clientAttempts) || accountAttempts >= accountLoginAttemptLimit {
+		if !loginAttemptAllowed(clientAttempts) || accountLoginAttemptShouldBlock(accountAttempts) {
 			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many login attempts; please try again later"})
 			return
 		}

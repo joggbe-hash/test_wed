@@ -80,11 +80,18 @@ func TestSessionCookiePersistenceMatchesRememberChoice(t *testing.T) {
 
 func TestAuthenticatedRememberedSessionRefreshesBrowserIdleDeadline(t *testing.T) {
 	user := &User{ID: 7, Username: "demo", sessionPersistent: true}
-	mux := newMuxWithSessionLoader(func(context.Context, string) (*User, error) {
+	loadCalls := 0
+	refreshCalls := 0
+	mux := newMuxWithSessionLoaders(func(context.Context, string) (*User, error) {
+		loadCalls++
+		return user, nil
+	}, func(context.Context, string) (*User, error) {
+		refreshCalls++
 		return user, nil
 	})
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
 	req.AddCookie(&http.Cookie{Name: "session", Value: "signed-session"})
+	req.Header.Set(browserRequestHeader, "1")
 	response := httptest.NewRecorder()
 
 	mux.ServeHTTP(response, req)
@@ -98,6 +105,37 @@ func TestAuthenticatedRememberedSessionRefreshesBrowserIdleDeadline(t *testing.T
 	}
 	if cookies[0].MaxAge != int(rememberSessionTTL.Seconds()) {
 		t.Fatalf("refreshed MaxAge = %d, want %d", cookies[0].MaxAge, int(rememberSessionTTL.Seconds()))
+	}
+	if loadCalls != 0 || refreshCalls != 1 {
+		t.Fatalf("loader calls = plain:%d refresh:%d, want plain:0 refresh:1", loadCalls, refreshCalls)
+	}
+}
+
+func TestCrossSiteGetDoesNotRefreshRememberedSession(t *testing.T) {
+	user := &User{ID: 7, Username: "demo", sessionPersistent: true}
+	loadCalls := 0
+	refreshCalls := 0
+	mux := newMuxWithSessionLoaders(func(context.Context, string) (*User, error) {
+		loadCalls++
+		return user, nil
+	}, func(context.Context, string) (*User, error) {
+		refreshCalls++
+		return user, nil
+	})
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/session", nil)
+	req.AddCookie(&http.Cookie{Name: "session", Value: "signed-session"})
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, req)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusOK)
+	}
+	if cookies := response.Result().Cookies(); len(cookies) != 0 {
+		t.Fatalf("cross-site GET refreshed persistent cookie: %#v", cookies)
+	}
+	if loadCalls != 1 || refreshCalls != 0 {
+		t.Fatalf("loader calls = plain:%d refresh:%d, want plain:1 refresh:0", loadCalls, refreshCalls)
 	}
 }
 

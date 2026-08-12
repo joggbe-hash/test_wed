@@ -80,7 +80,7 @@ func TestRedisVerificationChallengeBudgetDoesNotInvalidateHighEntropyCorrectCode
 	}
 }
 
-func TestRedisResendKeepsPreviousVerificationChallengeUsable(t *testing.T) {
+func TestRedisResendInvalidatesPreviousVerificationChallenge(t *testing.T) {
 	useIntegrationRedis(t)
 	ctx := context.Background()
 	email := "user@example.com"
@@ -97,8 +97,8 @@ func TestRedisResendKeepsPreviousVerificationChallengeUsable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("consume old challenge: %v", err)
 	}
-	if result != verificationAccepted {
-		t.Fatalf("old challenge result = %d, want accepted", result)
+	if result != verificationExpired {
+		t.Fatalf("old challenge result = %d, want expired", result)
 	}
 	result, err = consumeVerificationCode(ctx, email, newChallengeID, "client", "654321")
 	if err != nil {
@@ -169,7 +169,7 @@ func TestRedisVerificationSendBudgetHasCumulativeHourlyBound(t *testing.T) {
 	}
 }
 
-func TestRedisAccountBudgetBlocksCleanClientBeforePasswordVerification(t *testing.T) {
+func TestRedisAccountBudgetDoesNotBlockCleanClientBeforePasswordVerification(t *testing.T) {
 	useIntegrationRedis(t)
 	ctx := context.Background()
 	email := "user@example.com"
@@ -189,10 +189,10 @@ func TestRedisAccountBudgetBlocksCleanClientBeforePasswordVerification(t *testin
 	}
 	allowed, _, current, err := reserveLoginAttempt(ctx, email, "198.51.100.1")
 	if err != nil {
-		t.Fatalf("bounded attempt: %v", err)
+		t.Fatalf("clean-client attempt: %v", err)
 	}
-	if allowed || current != accountLoginAttemptLimit {
-		t.Fatalf("clean-client attempt after account exhaustion = allowed %v, count %d", allowed, current)
+	if !allowed || current != accountLoginAttemptLimit+1 {
+		t.Fatalf("clean-client attempt after account threshold = allowed %v, count %d", allowed, current)
 	}
 }
 
@@ -227,8 +227,15 @@ func TestRedisLoginAccountBudgetIsAtomicAcrossConcurrentClients(t *testing.T) {
 			allowedCount++
 		}
 	}
-	if allowedCount != accountLoginAttemptLimit {
-		t.Fatalf("concurrent clean clients allowed %d attempts, want %d", allowedCount, accountLoginAttemptLimit)
+	if allowedCount != attempts {
+		t.Fatalf("concurrent clean clients allowed %d attempts, want %d", allowedCount, attempts)
+	}
+	accountAttempts, err := rdb.Get(ctx, accountLoginAttemptKey("target@example.com")).Int64()
+	if err != nil {
+		t.Fatalf("load concurrent account attempts: %v", err)
+	}
+	if accountAttempts != attempts {
+		t.Fatalf("concurrent account attempts = %d, want %d", accountAttempts, attempts)
 	}
 }
 

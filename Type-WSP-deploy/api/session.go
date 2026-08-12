@@ -255,15 +255,20 @@ func DestroySession(ctx context.Context, signed string) error {
 	})
 }
 
-// requireAuthWithLoader 是需要登入的 handler middleware，驗證成功後把 User 放進 context。
-func requireAuthWithLoader(next http.HandlerFunc, loadSession sessionLoader) http.HandlerFunc {
+// requireAuthWithLoaders 是需要登入的 handler middleware，驗證成功後把 User 放進 context。
+func requireAuthWithLoaders(next http.HandlerFunc, loadSession, refreshSession sessionLoader) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("session")
 		if err != nil {
 			writeJSON(w, http.StatusUnauthorized, M{"error": "unauthorized"})
 			return
 		}
-		user, err := loadSession(r.Context(), cookie.Value)
+		refreshAllowed := r.Header.Get(browserRequestHeader) == "1"
+		selectedLoader := loadSession
+		if refreshAllowed {
+			selectedLoader = refreshSession
+		}
+		user, err := selectedLoader(r.Context(), cookie.Value)
 		if err != nil {
 			if errors.Is(err, errInvalidSession) {
 				writeJSON(w, http.StatusUnauthorized, M{"error": "invalid session"})
@@ -277,7 +282,7 @@ func requireAuthWithLoader(next http.HandlerFunc, loadSession sessionLoader) htt
 			writeJSON(w, http.StatusServiceUnavailable, M{"error": "session service unavailable"})
 			return
 		}
-		if user.sessionPersistent {
+		if refreshAllowed && user.sessionPersistent {
 			http.SetCookie(w, sessionCookieForLogin(cookie.Value, rememberSessionTTL, true))
 		}
 
