@@ -1,4 +1,4 @@
-import { computed, onBeforeMount, shallowRef, watch } from 'vue'
+import { computed, onBeforeMount, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   ApiError,
@@ -6,6 +6,7 @@ import {
   registerAccount,
   sendVerificationCode,
   verifyLoginAccount,
+  verifyLoginOwnership,
 } from '../../api/backendApi'
 import {
   apiErrorMessage,
@@ -31,10 +32,20 @@ export function useAuthPage() {
   const mode = shallowRef<'login' | 'register'>('login')
   const email = shallowRef('')
   const loginPassword = shallowRef('')
-  const loginStage = shallowRef<'credentials' | 'verification'>('credentials')
+  const loginStage = shallowRef<'credentials' | 'ownership' | 'verification'>('credentials')
   const loginCode = shallowRef('')
   const loginChallengeId = shallowRef('')
   const loginChallengeEmail = shallowRef('')
+  let loginChallengeRemember = false
+  const ownershipCode = shallowRef('')
+  const ownershipChallengeId = shallowRef('')
+  const ownershipChallengeEmail = shallowRef('')
+  let ownershipPassword = ''
+  let ownershipRemember = false
+  const passwordVerificationGrant = shallowRef('')
+  const passwordVerificationGrantEmail = shallowRef('')
+  const passwordVerificationGrantExpiresAt = shallowRef(0)
+  const passwordVerificationGrantAttemptsRemaining = shallowRef(0)
   const registerPassword = shallowRef('')
   const username = shallowRef('')
   const code = shallowRef('')
@@ -49,6 +60,7 @@ export function useAuthPage() {
   const showConfirmPassword = shallowRef(false)
   const rememberMe = shallowRef(false)
   const isCheckingSession = shallowRef(true)
+  let loginAttemptController: AbortController | null = null
 
   const authBackgroundStyle = {
     '--auth-background-image': `url("${publicAsset('picture/meme_background.jpg')}")`,
@@ -62,6 +74,7 @@ export function useAuthPage() {
   const trimmedUsername = computed(() => username.value.trim())
   const trimmedCode = computed(() => code.value.trim())
   const trimmedLoginCode = computed(() => loginCode.value.trim())
+  const normalizedOwnershipCode = computed(() => ownershipCode.value.trim().toUpperCase())
   const isRegisterEmailValid = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedEmail.value))
   const showRegisterEmailFormatError = computed(() => email.value.length > 0 && !isRegisterEmailValid.value)
   const isRegisterUsernameValid = computed(() =>
@@ -100,6 +113,12 @@ export function useAuthPage() {
     isRegisterPasswordStrong.value &&
     isRegisterPasswordMatched.value,
   )
+  const hasActiveOwnershipGrant = computed(() =>
+    passwordVerificationGrant.value.length > 0 &&
+    passwordVerificationGrantEmail.value === normalizedEmail.value &&
+    passwordVerificationGrantExpiresAt.value > Date.now() &&
+    passwordVerificationGrantAttemptsRemaining.value > 0,
+  )
 
   watch(loginPassword, (value) => {
     if (value.length === 0) showLoginPassword.value = false
@@ -119,6 +138,26 @@ export function useAuthPage() {
     if (loginChallengeEmail.value && value !== loginChallengeEmail.value) {
       resetLoginVerification()
     }
+    if (
+      (ownershipChallengeEmail.value && value !== ownershipChallengeEmail.value) ||
+      (passwordVerificationGrantEmail.value && value !== passwordVerificationGrantEmail.value)
+    ) {
+      abortLoginAttempt()
+      clearOwnershipChallenge()
+      clearOwnershipGrant()
+      loginStage.value = 'credentials'
+    }
+  })
+  watch(mode, (value) => {
+    if (value !== 'register') return
+    abortLoginAttempt()
+    loginPassword.value = ''
+    clearLoginChallenge()
+    clearOwnershipChallenge()
+    clearOwnershipGrant()
+    loginStage.value = 'credentials'
+    statusMessage.value = ''
+    errorMessage.value = ''
   })
 
   function setStatus(message: string) {
@@ -142,24 +181,221 @@ export function useAuthPage() {
       : '/home'
   }
 
+  function startLoginAttempt() {
+    loginAttemptController?.abort()
+    const controller = new AbortController()
+    loginAttemptController = controller
+    isSubmitting.value = true
+    return controller
+  }
+
+  function abortLoginAttempt() {
+    loginAttemptController?.abort()
+    loginAttemptController = null
+    isSubmitting.value = false
+  }
+
+  function isCurrentLoginAttempt(controller: AbortController) {
+    return loginAttemptController === controller && !controller.signal.aborted
+  }
+
+  function finishLoginAttempt(controller: AbortController) {
+    if (loginAttemptController !== controller) return
+    loginAttemptController = null
+    isSubmitting.value = false
+  }
+
+  function isAbortError(error: unknown) {
+    return error instanceof DOMException && error.name === 'AbortError'
+  }
+
+  function clearOwnershipChallenge() {
+    ownershipCode.value = ''
+    ownershipChallengeId.value = ''
+    ownershipChallengeEmail.value = ''
+    ownershipPassword = ''
+    ownershipRemember = false
+  }
+
+  function clearLoginChallenge() {
+    loginCode.value = ''
+    loginChallengeId.value = ''
+    loginChallengeEmail.value = ''
+    loginChallengeRemember = false
+  }
+
+  function clearOwnershipGrant() {
+    passwordVerificationGrant.value = ''
+    passwordVerificationGrantEmail.value = ''
+    passwordVerificationGrantExpiresAt.value = 0
+    passwordVerificationGrantAttemptsRemaining.value = 0
+  }
+
+  function usableOwnershipGrant(emailValue: string) {
+    if (
+      passwordVerificationGrantEmail.value !== emailValue ||
+      passwordVerificationGrantExpiresAt.value <= Date.now() ||
+      passwordVerificationGrantAttemptsRemaining.value <= 0
+    ) {
+      clearOwnershipGrant()
+      return undefined
+    }
+    return passwordVerificationGrant.value || undefined
+  }
+
+  function enterOwnershipChallenge(
+    error: unknown,
+    emailValue: string,
+    password = loginPassword.value,
+    remember = rememberMe.value,
+  ) {
+    if (
+      !(error instanceof ApiError) ||
+      error.code !== 'LOGIN_EMAIL_OWNERSHIP_REQUIRED' ||
+      !error.ownershipChallenge
+    ) return false
+
+    clearLoginChallenge()
+    clearOwnershipGrant()
+    ownershipChallengeId.value = error.ownershipChallenge.challenge_id
+    ownershipChallengeEmail.value = emailValue
+    ownershipPassword = password
+    ownershipRemember = remember
+    ownershipCode.value = ''
+    loginStage.value = 'ownership'
+    setStatus('16 位 Email 擁有權安全碼已寄出，請輸入最新一封信中的安全碼。')
+    return true
+  }
+
+  function completePasswordLogin(
+    challenge: Awaited<ReturnType<typeof loginAccount>>,
+    emailValue: string,
+    remember: boolean,
+    controller: AbortController,
+  ) {
+    if (!isCurrentLoginAttempt(controller)) return
+    loginChallengeId.value = challenge.challenge_id
+    loginChallengeEmail.value = emailValue
+    loginCode.value = ''
+    loginChallengeRemember = remember
+    loginPassword.value = ''
+    clearOwnershipChallenge()
+    clearOwnershipGrant()
+    loginStage.value = 'verification'
+    setStatus('登入驗證碼已寄出，請在 5 分鐘內輸入。')
+  }
+
+  function ownershipErrorMessage(error: unknown) {
+    if (error instanceof ApiError && (error.status === 400 || error.status === 401)) {
+      return 'Email 擁有權安全碼不正確、已過期，或不是最新一封。'
+    }
+    if (error instanceof ApiError && error.status === 429) {
+      return '安全碼嘗試次數過多，請使用最新一封安全碼或稍後再試。'
+    }
+    return apiErrorMessage(error, 'Email 擁有權驗證失敗，請稍後再試。')
+  }
+
+  async function submitPasswordLogin(
+    loginEmail: string,
+    password: string,
+    remember: boolean,
+    grant: string | undefined,
+    controller: AbortController,
+  ) {
+    try {
+      const challenge = await loginAccount(loginEmail, password, remember, {
+        ...(grant ? { passwordVerificationGrant: grant } : {}),
+        signal: controller.signal,
+      })
+      completePasswordLogin(challenge, loginEmail.toLowerCase(), remember, controller)
+    } catch (error) {
+      if (!isCurrentLoginAttempt(controller) || isAbortError(error)) return
+      if (enterOwnershipChallenge(error, loginEmail.toLowerCase(), password, remember)) return
+
+      if (grant && error instanceof ApiError && error.status === 401) {
+        passwordVerificationGrantAttemptsRemaining.value -= 1
+        if (passwordVerificationGrantAttemptsRemaining.value <= 0) clearOwnershipGrant()
+      }
+      clearOwnershipChallenge()
+      loginStage.value = 'credentials'
+      setFormError(loginErrorMessage(error))
+    }
+  }
+
   async function handleLogin() {
     if (!trimmedEmail.value) return setFormError('請輸入電子信箱')
     if (!loginPassword.value) return setFormError('請輸入密碼')
 
-    isSubmitting.value = true
+    const loginEmail = trimmedEmail.value
+    const normalizedLoginEmail = loginEmail.toLowerCase()
+    const password = loginPassword.value
+    const remember = rememberMe.value
+    const grant = usableOwnershipGrant(normalizedLoginEmail)
+    clearLoginChallenge()
+    const controller = startLoginAttempt()
     try {
-      const challenge = await loginAccount(trimmedEmail.value, loginPassword.value, rememberMe.value)
-      loginChallengeId.value = challenge.challenge_id
-      loginChallengeEmail.value = normalizedEmail.value
-      loginCode.value = ''
-      loginPassword.value = ''
-      loginStage.value = 'verification'
-      setStatus('登入驗證碼已寄出，請在 5 分鐘內輸入。')
-    } catch (error) {
-      setFormError(loginErrorMessage(error))
+      await submitPasswordLogin(loginEmail, password, remember, grant, controller)
     } finally {
-      isSubmitting.value = false
+      finishLoginAttempt(controller)
     }
+  }
+
+  async function handleVerifyLoginOwnership() {
+    if (!ownershipChallengeId.value || ownershipChallengeEmail.value !== normalizedEmail.value) {
+      clearOwnershipChallenge()
+      clearOwnershipGrant()
+      loginStage.value = 'credentials'
+      return setFormError('Email 擁有權驗證已失效，請重新輸入電子信箱與密碼。')
+    }
+    if (!/^[A-HJ-NP-Z2-9]{16}$/.test(normalizedOwnershipCode.value)) {
+      return setFormError('請輸入 16 位 Base32 Email 擁有權安全碼。')
+    }
+    if (!ownershipPassword) {
+      clearOwnershipChallenge()
+      clearOwnershipGrant()
+      loginStage.value = 'credentials'
+      return setFormError('密碼已清除，請重新輸入帳密。')
+    }
+
+    const loginEmail = ownershipChallengeEmail.value
+    const challengeId = ownershipChallengeId.value
+    const submittedCode = normalizedOwnershipCode.value
+    const password = ownershipPassword
+    const remember = ownershipRemember
+    const controller = startLoginAttempt()
+    try {
+      const response = await verifyLoginOwnership({
+        email: loginEmail,
+        challenge_id: challengeId,
+        code: submittedCode,
+      }, controller.signal)
+      if (!isCurrentLoginAttempt(controller)) return
+
+      passwordVerificationGrant.value = response.password_verification_grant
+      passwordVerificationGrantEmail.value = loginEmail
+      passwordVerificationGrantExpiresAt.value = Date.now() + response.expires_in_seconds * 1000
+      passwordVerificationGrantAttemptsRemaining.value = response.max_attempts
+      clearOwnershipChallenge()
+      setStatus('Email 擁有權已確認，正在重新驗證密碼…')
+      await submitPasswordLogin(loginEmail, password, remember, response.password_verification_grant, controller)
+    } catch (error) {
+      if (!isCurrentLoginAttempt(controller) || isAbortError(error)) return
+      if (!enterOwnershipChallenge(error, loginEmail, password, remember)) {
+        loginStage.value = 'ownership'
+        setFormError(ownershipErrorMessage(error))
+      }
+    } finally {
+      finishLoginAttempt(controller)
+    }
+  }
+
+  function cancelLoginAttempt() {
+    abortLoginAttempt()
+    clearLoginChallenge()
+    clearOwnershipChallenge()
+    clearOwnershipGrant()
+    loginStage.value = 'credentials'
+    setFormError('已取消 Email 擁有權驗證')
   }
 
   async function handleVerifyLogin() {
@@ -170,28 +406,43 @@ export function useAuthPage() {
       return setFormError('請輸入 6 位數登入驗證碼。')
     }
 
-    isSubmitting.value = true
+    const loginEmail = loginChallengeEmail.value
+    const submittedCode = trimmedLoginCode.value
+    const challengeId = loginChallengeId.value
+    const remember = loginChallengeRemember
+    const controller = startLoginAttempt()
     try {
       const { user } = await verifyLoginAccount({
-        email: loginChallengeEmail.value,
-        code: trimmedLoginCode.value,
-        challenge_id: loginChallengeId.value,
-        remember: rememberMe.value,
-      })
+        email: loginEmail,
+        code: submittedCode,
+        challenge_id: challengeId,
+        remember,
+      }, controller.signal)
+      if (!isCurrentLoginAttempt(controller)) return
+
+      clearLoginChallenge()
       setCurrentSession(user)
       await router.replace(redirectAfterLogin())
     } catch (error) {
+      if (!isCurrentLoginAttempt(controller) || isAbortError(error)) return
       setFormError(loginVerificationErrorMessage(error))
     } finally {
-      isSubmitting.value = false
+      finishLoginAttempt(controller)
     }
   }
 
+  function handleLoginSubmit() {
+    if (loginStage.value === 'ownership') return handleVerifyLoginOwnership()
+    if (loginStage.value === 'verification') return handleVerifyLogin()
+    return handleLogin()
+  }
+
   function resetLoginVerification() {
+    abortLoginAttempt()
     loginStage.value = 'credentials'
-    loginCode.value = ''
-    loginChallengeId.value = ''
-    loginChallengeEmail.value = ''
+    clearLoginChallenge()
+    clearOwnershipChallenge()
+    clearOwnershipGrant()
     statusMessage.value = ''
     errorMessage.value = ''
   }
@@ -259,8 +510,17 @@ export function useAuthPage() {
     }
   })
 
+  onBeforeUnmount(() => {
+    abortLoginAttempt()
+    loginPassword.value = ''
+    clearLoginChallenge()
+    clearOwnershipChallenge()
+    clearOwnershipGrant()
+  })
+
   return {
     mode, email, loginPassword, loginStage, loginCode, loginChallengeId,
+    ownershipCode, ownershipChallengeId, ownershipChallengeEmail, hasActiveOwnershipGrant,
     registerPassword, username, code, confirmPassword,
     isSubmitting, statusMessage, errorMessage, showLoginPassword, showRegisterPassword,
     showConfirmPassword, rememberMe, isCheckingSession, authBackgroundStyle,
@@ -269,6 +529,7 @@ export function useAuthPage() {
     hasRegisterPassword, registerPasswordType, registerPasswordToggleLabel,
     hasConfirmPassword, confirmPasswordType, confirmPasswordToggleLabel,
     showRegisterPasswordMismatch, showRegisterPasswordStrengthError, registerPasswordErrorMessage, canRegister,
-    handleLogin, handleVerifyLogin, resetLoginVerification, handleSendCode, handleRegister,
+    handleLogin, handleLoginSubmit, handleVerifyLoginOwnership, cancelLoginAttempt,
+    handleVerifyLogin, resetLoginVerification, handleSendCode, handleRegister,
   }
 }

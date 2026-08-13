@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base32"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -131,20 +132,75 @@ end
 return 1
 `)
 	activateVerificationChallengeScript = redis.NewScript(`
+local previousChallenge = redis.call('GET', KEYS[2]) or ''
 redis.call('SET', KEYS[1], ARGV[1], 'PX', ARGV[3])
 redis.call('SET', KEYS[2], ARGV[2], 'PX', ARGV[3])
+return previousChallenge
+`)
+	commitRegistrationChallengeScript = redis.NewScript(`
+local maxLength = tonumber(ARGV[1])
+local ttl = tonumber(ARGV[6])
+if not maxLength or maxLength <= 0 or not ttl or ttl <= 0 then
+  return redis.error_reply('invalid registration challenge commit arguments')
+end
+
+local function keyType(key)
+  local result = redis.call('TYPE', key)
+  if type(result) == 'table' then return result['ok'] end
+  return result
+end
+local streamType = keyType(KEYS[1])
+if streamType ~= 'none' and streamType ~= 'stream' then
+  return redis.error_reply('WRONGTYPE task stream key is not a stream')
+end
+local latestType = keyType(KEYS[3])
+if latestType ~= 'none' and latestType ~= 'string' then
+  return redis.error_reply('WRONGTYPE registration latest challenge key is not a string')
+end
+if redis.call('EXISTS', KEYS[2]) ~= 0 then
+  return redis.error_reply('registration challenge key already exists')
+end
+if redis.call('XLEN', KEYS[1]) >= maxLength then
+  return 0
+end
+
+local taskID = redis.pcall(
+  'XADD', KEYS[1], '*',
+  'type', ARGV[2],
+  'payload', ARGV[3],
+  'attempts', '0'
+)
+if type(taskID) == 'table' and taskID.err then
+  return taskID
+end
+
+local codeResult = redis.pcall('SET', KEYS[2], ARGV[4], 'PX', ttl)
+if type(codeResult) == 'table' and codeResult.err then
+  redis.pcall('XDEL', KEYS[1], taskID)
+  return codeResult
+end
+local latestResult = redis.pcall('SET', KEYS[3], ARGV[5], 'PX', ttl)
+if type(latestResult) == 'table' and latestResult.err then
+  redis.pcall('DEL', KEYS[2])
+  redis.pcall('XDEL', KEYS[1], taskID)
+  return latestResult
+end
 return 1
+`)
+	loadActiveRegistrationChallengeScript = redis.NewScript(`
+local activeChallenge = redis.call('GET', KEYS[1])
+if not activeChallenge or activeChallenge ~= ARGV[1] then
+  return {}
+end
+local code = redis.call('GET', KEYS[2])
+if not code then
+  return {}
+end
+return {activeChallenge, code}
 `)
 	rollbackVerificationChallengeScript = redis.NewScript(`
 if redis.call('GET', KEYS[2]) == ARGV[1] then
   redis.call('DEL', KEYS[1], KEYS[2])
-end
-return 1
-`)
-	rollbackRegistrationChallengeScript = redis.NewScript(`
-redis.call('DEL', KEYS[1])
-if redis.call('GET', KEYS[2]) == ARGV[1] then
-  redis.call('DEL', KEYS[2])
 end
 return 1
 `)
@@ -211,8 +267,38 @@ end
 return 0
 `)
 	reserveLoginAttemptScript = redis.NewScript(`
+local function keyType(key)
+  local result = redis.call('TYPE', key)
+  if type(result) == 'table' then return result['ok'] end
+  return result
+end
+for index = 1, 3 do
+  local actual = keyType(KEYS[index])
+  if actual ~= 'none' and actual ~= 'string' then
+    return redis.error_reply('unexpected login admission key type')
+  end
+end
 local clientAttempts = tonumber(redis.call('GET', KEYS[1]) or '0')
 local accountAttempts = tonumber(redis.call('GET', KEYS[2]) or '0')
+if not clientAttempts or clientAttempts < 0 or clientAttempts ~= math.floor(clientAttempts)
+  or not accountAttempts or accountAttempts < 0 or accountAttempts ~= math.floor(accountAttempts) then
+  return redis.error_reply('invalid login attempt counter')
+end
+local grantUses = redis.call('GET', KEYS[3])
+if grantUses then
+  grantUses = tonumber(grantUses)
+  if not grantUses or grantUses <= 0 or grantUses ~= math.floor(grantUses) then
+    return redis.error_reply('invalid password verification grant')
+  end
+  local grantTTL = redis.call('PTTL', KEYS[3])
+  if grantTTL > 0 then
+    return {3, clientAttempts, accountAttempts}
+  end
+  return redis.error_reply('password verification grant has no expiry')
+end
+if accountAttempts >= tonumber(ARGV[4]) then
+  return {2, clientAttempts, accountAttempts}
+end
 if clientAttempts >= tonumber(ARGV[3]) then
   return {0, clientAttempts, accountAttempts}
 end
@@ -393,38 +479,64 @@ func redisCounter(value any) (int64, error) {
 	}
 }
 
-func reserveLoginAttempt(ctx context.Context, email, clientIdentity string) (bool, int64, int64, error) {
+func reserveLoginAttempt(
+	ctx context.Context,
+	email, clientIdentity, passwordVerificationGrant string,
+) (loginAdmission, int64, int64, error) {
+	grantKey := loginOwnershipGrantPrefix + "invalid"
+	if validPasswordVerificationGrant(passwordVerificationGrant) {
+		grantKey = loginOwnershipGrantKey(email, clientIdentity, passwordVerificationGrant)
+	}
+
 	values, err := reserveLoginAttemptScript.Run(
 		ctx,
 		rdb,
-		[]string{loginAttemptKey(email, clientIdentity), accountLoginAttemptKey(email)},
+		[]string{loginAttemptKey(email, clientIdentity), accountLoginAttemptKey(email), grantKey},
 		loginAttemptWindow.Milliseconds(),
 		accountLoginAttemptWindow.Milliseconds(),
 		loginAttemptLimit,
 		accountLoginAttemptLimit,
 	).Slice()
 	if err != nil {
-		return false, 0, 0, fmt.Errorf("reserve login attempt failed: %w", err)
+		return loginAdmissionBlocked, 0, 0, fmt.Errorf("reserve login attempt failed: %w", err)
 	}
 	if len(values) != 3 {
-		return false, 0, 0, fmt.Errorf("reserve login attempt returned %d values", len(values))
+		return loginAdmissionBlocked, 0, 0, fmt.Errorf("reserve login attempt returned %d values", len(values))
 	}
-	reserved, err := redisCounter(values[0])
+	admissionValue, err := redisCounter(values[0])
 	if err != nil {
-		return false, 0, 0, fmt.Errorf("decode login reservation result: %w", err)
+		return loginAdmissionBlocked, 0, 0, fmt.Errorf("decode login reservation result: %w", err)
 	}
 	clientAttempts, err := redisCounter(values[1])
 	if err != nil {
-		return false, 0, 0, fmt.Errorf("decode client login attempts: %w", err)
+		return loginAdmissionBlocked, 0, 0, fmt.Errorf("decode client login attempts: %w", err)
 	}
 	accountAttempts, err := redisCounter(values[2])
 	if err != nil {
-		return false, 0, 0, fmt.Errorf("decode account login attempts: %w", err)
+		return loginAdmissionBlocked, 0, 0, fmt.Errorf("decode account login attempts: %w", err)
 	}
-	if reserved == 0 && !loginPreAuthenticationShouldBlock(clientAttempts, accountAttempts) {
-		return false, 0, 0, fmt.Errorf("login reservation rejected below configured limits")
+	admission := loginAdmission(admissionValue)
+	switch admission {
+	case loginAdmissionBlocked:
+		if !loginAttemptShouldBlock(clientAttempts) {
+			return loginAdmissionBlocked, 0, 0, fmt.Errorf("login reservation blocked below the client limit")
+		}
+	case loginAdmissionAllowed:
+		if clientAttempts <= 0 || accountAttempts <= 0 {
+			return loginAdmissionBlocked, 0, 0, fmt.Errorf("login reservation admitted without incrementing counters")
+		}
+	case loginAdmissionOwnershipRequired:
+		if !accountLoginAttemptShouldBlock(accountAttempts) {
+			return loginAdmissionBlocked, 0, 0, fmt.Errorf("login reservation required ownership below the account limit")
+		}
+	case loginAdmissionGrantCandidate:
+		if !validPasswordVerificationGrant(passwordVerificationGrant) {
+			return loginAdmissionBlocked, 0, 0, fmt.Errorf("login reservation returned a candidate for an invalid grant")
+		}
+	default:
+		return loginAdmissionBlocked, 0, 0, fmt.Errorf("login reservation returned invalid admission %d", admissionValue)
 	}
-	return reserved == 1, clientAttempts, accountAttempts, nil
+	return admission, clientAttempts, accountAttempts, nil
 }
 
 func loginAttemptShouldBlock(attempts int64) bool {
@@ -433,10 +545,6 @@ func loginAttemptShouldBlock(attempts int64) bool {
 
 func accountLoginAttemptShouldBlock(attempts int64) bool {
 	return attempts >= accountLoginAttemptLimit
-}
-
-func loginPreAuthenticationShouldBlock(clientAttempts, _ int64) bool {
-	return loginAttemptShouldBlock(clientAttempts)
 }
 
 func resetLoginAttempts(ctx context.Context, email, clientIdentity string) error {
@@ -541,15 +649,80 @@ const (
 	verificationLocked   verificationResult = 2
 )
 
-func activateVerificationChallenge(ctx context.Context, email, challengeID, code string) error {
-	return activateVerificationChallengeScript.Run(
+func activateVerificationChallenge(ctx context.Context, email, challengeID, code string) (string, error) {
+	previousChallengeID, err := activateVerificationChallengeScript.Run(
 		ctx,
 		rdb,
 		[]string{verificationCodeKey(email, challengeID), verificationLatestChallengeKey(email)},
 		code,
 		challengeID,
 		registrationCodeTTL.Milliseconds(),
-	).Err()
+	).Text()
+	if err != nil {
+		return "", err
+	}
+	return previousChallengeID, nil
+}
+
+func commitRegistrationVerificationChallenge(ctx context.Context, email, challengeID, code string) error {
+	payloadJSON, err := json.Marshal(M{
+		"email": email,
+		"code":  code,
+	})
+	if err != nil {
+		return fmt.Errorf("encode registration verification email task failed: %w", err)
+	}
+
+	committed, err := commitRegistrationChallengeScript.Run(
+		ctx,
+		rdb,
+		[]string{
+			contracts.TaskStreamKey,
+			verificationCodeKey(email, challengeID),
+			verificationLatestChallengeKey(email),
+		},
+		maxTaskStreamLength,
+		contracts.TaskSendVerificationEmail,
+		string(payloadJSON),
+		code,
+		challengeID,
+		registrationCodeTTL.Milliseconds(),
+	).Int()
+	if err != nil {
+		return fmt.Errorf("commit registration verification challenge failed: %w", err)
+	}
+	if committed == 0 {
+		return errTaskQueueFull
+	}
+	return nil
+}
+
+func loadActiveRegistrationVerificationChallenge(ctx context.Context, email string) (string, string, error) {
+	for attempt := 0; attempt < 2; attempt++ {
+		challengeID, err := rdb.Get(ctx, verificationLatestChallengeKey(email)).Result()
+		if err != nil {
+			return "", "", err
+		}
+		active, err := loadActiveRegistrationChallengeScript.Run(
+			ctx,
+			rdb,
+			[]string{
+				verificationLatestChallengeKey(email),
+				verificationCodeKey(email, challengeID),
+			},
+			challengeID,
+		).StringSlice()
+		if err != nil {
+			return "", "", err
+		}
+		if len(active) == 2 {
+			return active[0], active[1], nil
+		}
+		if len(active) != 0 {
+			return "", "", fmt.Errorf("load active registration challenge returned %d values", len(active))
+		}
+	}
+	return "", "", redis.Nil
 }
 
 func activateLoginVerificationChallenge(ctx context.Context, email, challengeID, code string) error {
@@ -568,15 +741,6 @@ func rollbackLoginVerificationChallenge(ctx context.Context, email, challengeID 
 		ctx,
 		rdb,
 		[]string{loginVerificationCodeKey(email), loginVerificationActiveChallengeKey(email)},
-		challengeID,
-	).Err()
-}
-
-func rollbackVerificationChallenge(ctx context.Context, email, challengeID string) error {
-	return rollbackRegistrationChallengeScript.Run(
-		ctx,
-		rdb,
-		[]string{verificationCodeKey(email, challengeID), verificationLatestChallengeKey(email)},
 		challengeID,
 	).Err()
 }
@@ -708,9 +872,8 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if reservation < 0 {
-		challengeID, latestErr := rdb.Get(ctx, verificationLatestChallengeKey(email)).Result()
+		challengeID, code, latestErr := loadActiveRegistrationVerificationChallenge(ctx, email)
 		if latestErr == nil {
-			code, _ := rdb.Get(ctx, verificationCodeKey(email, challengeID)).Result()
 			writeJSON(w, http.StatusOK, verificationCodeResponse(challengeID, code))
 			return
 		}
@@ -730,19 +893,7 @@ func handleSendCode(w http.ResponseWriter, r *http.Request) {
 	})
 
 	challengeID := uuid.NewString()
-	if err := activateVerificationChallenge(ctx, email, challengeID, code); err != nil {
-		_ = rollbackVerificationSend(ctx, email, clientIdentity)
-		writeJSON(w, http.StatusInternalServerError, M{"error": "save verification code failed"})
-		return
-	}
-	ops.Add("delete verification challenge", func(cleanupCtx context.Context) error {
-		return rollbackVerificationChallenge(cleanupCtx, email, challengeID)
-	})
-
-	if err := enqueueTask(ctx, contracts.TaskSendVerificationEmail, M{
-		"email": email,
-		"code":  code,
-	}); err != nil {
+	if err := commitRegistrationVerificationChallenge(ctx, email, challengeID, code); err != nil {
 		if rollbackErr := ops.Execute(ctx); rollbackErr != nil {
 			log.Printf("rollback send-code request failed: %v", rollbackErr)
 		}
@@ -852,9 +1003,10 @@ func handleRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 type loginRequest struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-	Remember bool   `json:"remember"`
+	Email                     string `json:"email"`
+	Password                  string `json:"password"`
+	Remember                  bool   `json:"remember"`
+	PasswordVerificationGrant string `json:"password_verification_grant,omitempty"`
 }
 
 type clientUser struct {
@@ -881,8 +1033,27 @@ func verifyLoginPassword(passwordHash, password string) bool {
 	return verifyLoginPasswordWithCompare(passwordHash, password, bcrypt.CompareHashAndPassword)
 }
 
-// handleLogin 檢查帳密後寄送短效登入驗證碼；此階段不建立 Session。
+type loginUserLookup func(context.Context, string) (User, string)
+
+func loadLoginUser(ctx context.Context, email string) (User, string) {
+	var user User
+	var passwordHash string
+	if err := userPool.QueryRow(ctx,
+		"SELECT id, username, email, password_hash FROM users WHERE email = $1",
+		email,
+	).Scan(&user.ID, &user.Username, &user.Email, &passwordHash); err != nil {
+		return User{}, ""
+	}
+	return user, passwordHash
+}
+
 func handleLogin(w http.ResponseWriter, r *http.Request) {
+	handleLoginWithUserLookup(w, r, loadLoginUser)
+}
+
+func handleLoginWithUserLookup(w http.ResponseWriter, r *http.Request, lookup loginUserLookup) {
+	// Password success still enters the existing short-lived OTP phase; this
+	// handler never creates a session directly.
 	limitAuthRequestBody(w, r)
 	var req loginRequest
 	if err := readJSON(r, &req); err != nil || req.Email == "" || req.Password == "" {
@@ -897,13 +1068,29 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	clientIdentity := requestClientIdentity(r)
-	reserved, clientAttempts, accountAttempts, err := reserveLoginAttempt(ctx, email, clientIdentity)
+	admission, clientAttempts, accountAttempts, err := reserveLoginAttempt(
+		ctx,
+		email,
+		clientIdentity,
+		req.PasswordVerificationGrant,
+	)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
 		return
 	}
-	if !reserved {
+	switch admission {
+	case loginAdmissionBlocked:
 		writeJSON(w, http.StatusTooManyRequests, M{"error": "too many login attempts; please try again later"})
+		return
+	case loginAdmissionOwnershipRequired:
+		writeLoginOwnershipRequired(w, ctx, email, clientIdentity)
+		return
+	case loginAdmissionAllowed:
+		// Continue to the bounded password-verification lane.
+	case loginAdmissionGrantCandidate:
+		// The grant remains untouched until a bcrypt lane has been acquired.
+	default:
+		writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
 		return
 	}
 	if !loginPasswordVerificationConcurrency.tryAcquire() {
@@ -912,24 +1099,52 @@ func handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	defer loginPasswordVerificationConcurrency.release()
 
-	var user User
-	var passwordHash string
-	err = userPool.QueryRow(ctx,
-		"SELECT id, username, email, password_hash FROM users WHERE email = $1",
-		email,
-	).Scan(&user.ID, &user.Username, &user.Email, &passwordHash)
-	if err != nil {
-		passwordHash = ""
+	remainingGrantAttempts := int64(0)
+	if admission == loginAdmissionGrantCandidate {
+		var consumed bool
+		consumed, clientAttempts, accountAttempts, remainingGrantAttempts, err = consumePasswordVerificationGrantAndReserveAttempt(
+			ctx,
+			email,
+			clientIdentity,
+			req.PasswordVerificationGrant,
+		)
+		if err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
+			return
+		}
+		if !consumed {
+			writeLoginOwnershipRequired(w, ctx, email, clientIdentity)
+			return
+		}
 	}
 
+	_, passwordHash := lookup(ctx, email)
 	passwordMatches := verifyLoginPassword(passwordHash, req.Password)
 	if !passwordMatches {
-		if !loginAttemptAllowed(clientAttempts) || accountLoginAttemptShouldBlock(accountAttempts) {
+		if admission == loginAdmissionGrantCandidate {
+			if remainingGrantAttempts == 0 {
+				writeLoginOwnershipRequired(w, ctx, email, clientIdentity)
+				return
+			}
+			writeJSON(w, http.StatusUnauthorized, M{"error": "invalid email or password"})
+			return
+		}
+		if accountLoginAttemptShouldBlock(accountAttempts) {
+			writeLoginOwnershipRequired(w, ctx, email, clientIdentity)
+			return
+		}
+		if !loginAttemptAllowed(clientAttempts) {
 			writeJSON(w, http.StatusTooManyRequests, M{"error": "too many login attempts; please try again later"})
 			return
 		}
 		writeJSON(w, http.StatusUnauthorized, M{"error": "invalid email or password"})
 		return
+	}
+	if admission == loginAdmissionGrantCandidate {
+		if err := revokePasswordVerificationGrant(ctx, email, clientIdentity, req.PasswordVerificationGrant); err != nil {
+			writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
+			return
+		}
 	}
 	reservation, err := reserveLoginVerificationSend(ctx, email, clientIdentity)
 	if err != nil {
@@ -988,10 +1203,25 @@ type loginVerificationRequest struct {
 	Remember    bool   `json:"remember"`
 }
 
+type loginVerificationUserLookup func(context.Context, string) (User, error)
+
+func loadLoginVerificationUser(ctx context.Context, email string) (User, error) {
+	var user User
+	err := userPool.QueryRow(ctx,
+		"SELECT id, username, email FROM users WHERE email = $1",
+		email,
+	).Scan(&user.ID, &user.Username, &user.Email)
+	return user, err
+}
+
 // handleLoginVerification atomically consumes the email code before creating
 // the Redis session. A password-only request can never reach this endpoint's
 // session creation path because login challenges are issued only by handleLogin.
 func handleLoginVerification(w http.ResponseWriter, r *http.Request) {
+	handleLoginVerificationWithUserLookup(w, r, loadLoginVerificationUser)
+}
+
+func handleLoginVerificationWithUserLookup(w http.ResponseWriter, r *http.Request, lookup loginVerificationUserLookup) {
 	limitAuthRequestBody(w, r)
 	var req loginVerificationRequest
 	if err := readJSON(r, &req); err != nil || req.Email == "" || req.Code == "" || req.ChallengeID == "" {
@@ -1014,20 +1244,8 @@ func handleLoginVerification(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	var user User
-	if err := userPool.QueryRow(ctx,
-		"SELECT id, username, email FROM users WHERE email = $1",
-		email,
-	).Scan(&user.ID, &user.Username, &user.Email); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			writeJSON(w, http.StatusBadRequest, M{"error": "login verification code expired or not found"})
-			return
-		}
-		writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
-		return
-	}
-
-	result, err := consumeLoginVerificationCode(ctx, email, req.ChallengeID, requestClientIdentity(r), req.Code)
+	clientIdentity := requestClientIdentity(r)
+	result, err := consumeLoginVerificationCode(ctx, email, req.ChallengeID, clientIdentity, req.Code)
 	if err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, M{"error": "verification service unavailable"})
 		return
@@ -1049,7 +1267,16 @@ func handleLoginVerification(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	clientIdentity := requestClientIdentity(r)
+	user, err := lookup(ctx, email)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeJSON(w, http.StatusBadRequest, M{"error": "login verification code expired or not found"})
+			return
+		}
+		writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
+		return
+	}
+
 	if err := resetLoginAttempts(ctx, email, clientIdentity); err != nil {
 		writeJSON(w, http.StatusServiceUnavailable, M{"error": "authentication service unavailable"})
 		return

@@ -81,6 +81,22 @@ func TestLoginVerificationRouteRejectsRequestsWithoutBrowserHeader(t *testing.T)
 	}
 }
 
+func TestLoginOwnershipVerificationRouteRejectsRequestsWithoutBrowserHeader(t *testing.T) {
+	mux := newMuxWithSessionLoader(func(_ context.Context, _ string) (*User, error) {
+		t.Fatal("session loader must not run for login ownership verification")
+		return nil, nil
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login/ownership/verify", strings.NewReader(`{"email":"user@example.com","code":"ABCDEFGHJKLMNPQ2","challenge_id":"2cd53940-fc0d-4972-921b-086061dde6e5"}`))
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+
+	mux.ServeHTTP(response, req)
+
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", response.Code, http.StatusForbidden)
+	}
+}
+
 func TestReadJSONRequiresApplicationJSONAndSingleValue(t *testing.T) {
 	for _, test := range []struct {
 		name        string

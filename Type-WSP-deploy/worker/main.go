@@ -29,10 +29,14 @@ type ImagePostPayload struct {
 	RawKeys []string `json:"raw_keys"`
 }
 
-// EmailPayload 第一版先只印出驗證碼；之後可以在這裡接 SMTP 或第三方寄信服務。
+// EmailPayload accepts the legacy verification shape plus additive purpose metadata.
 type EmailPayload struct {
-	Email string `json:"email"`
-	Code  string `json:"code"`
+	Purpose            string `json:"purpose"`
+	Email              string `json:"email"`
+	Code               string `json:"code"`
+	ChallengeID        string `json:"challenge_id"`
+	DeliveryID         string `json:"delivery_id"`
+	ExpiresAtUnixMilli int64  `json:"expires_at_unix_milli"`
 }
 
 type ImageDeletePayload struct {

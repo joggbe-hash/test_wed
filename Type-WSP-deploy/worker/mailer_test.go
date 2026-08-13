@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"mime"
 	"net"
 	"strconv"
 	"strings"
@@ -31,6 +32,30 @@ func TestRegistrationVerificationEmailUsesRegistrationExpiry(t *testing.T) {
 	message := verificationEmailMessage("no-reply@type-wsp.local", "user@example.test", "ABCDEFGHJKLMNPQR")
 	if !strings.Contains(message, "24 小時") {
 		t.Fatalf("registration email does not describe its 24-hour expiry: %q", message)
+	}
+}
+
+func TestLoginOwnershipEmailMessageStatesPurposeAndExactExpiry(t *testing.T) {
+	expiresAt := time.Date(2027, time.January, 2, 3, 4, 5, 0, time.UTC)
+	message := loginOwnershipEmailMessage(
+		"no-reply@type-wsp.local",
+		"user@example.test",
+		"ABCDEFGHJKLMNPQR",
+		expiresAt,
+	)
+	for _, expected := range []string{
+		mime.QEncoding.Encode("UTF-8", "Type-WSP 登入安全驗證"),
+		"你的登入安全驗證碼是：ABCDEFGHJKLMNPQR",
+		"此短效驗證碼將於 2027-01-02T03:04:05Z（UTC）失效。",
+		"僅用於登入前確認此信箱由你持有。",
+		"若非本人操作，請忽略這封信。",
+	} {
+		if !strings.Contains(message, expected) {
+			t.Fatalf("login ownership message does not contain %q: %q", expected, message)
+		}
+	}
+	if strings.Contains(message, "註冊") || strings.Contains(strings.ToLower(message), "registration") {
+		t.Fatalf("login ownership message is mislabeled as registration: %q", message)
 	}
 }
 
@@ -77,6 +102,42 @@ func TestSMTPMailSenderDeliversVerificationMessage(t *testing.T) {
 	}
 }
 
+func TestSMTPMailSenderDeliversLoginOwnershipMessage(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { listener.Close() })
+
+	messages := make(chan string, 1)
+	serverErrors := make(chan error, 1)
+	go serveOneSMTPMessage(listener, messages, serverErrors)
+
+	host, rawPort, _ := net.SplitHostPort(listener.Addr().String())
+	port, _ := strconv.Atoi(rawPort)
+	sender := &SMTPMailSender{
+		host: host, port: port, from: "no-reply@type-wsp.local", timeout: 3 * time.Second,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	expiresAt := time.Date(2027, time.January, 2, 3, 4, 5, 0, time.UTC)
+	if err := sender.SendLoginOwnershipCode(ctx, "user@example.test", "ABCDEFGHJKLMNPQR", expiresAt); err != nil {
+		t.Fatalf("SendLoginOwnershipCode: %v", err)
+	}
+
+	select {
+	case err := <-serverErrors:
+		t.Fatalf("SMTP server: %v", err)
+	case message := <-messages:
+		if !strings.Contains(message, "你的登入安全驗證碼是：ABCDEFGHJKLMNPQR") ||
+			!strings.Contains(message, "2027-01-02T03:04:05Z（UTC）") {
+			t.Fatalf("message does not describe login ownership verification: %q", message)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for SMTP message")
+	}
+}
+
 func TestVerificationCodeValidationAcceptsRegistrationAndLoginFormats(t *testing.T) {
 	for _, code := range []string{"123456", "ABCDEFGHJKLMNPQR"} {
 		if !validVerificationEmailCode(code) {
@@ -86,6 +147,17 @@ func TestVerificationCodeValidationAcceptsRegistrationAndLoginFormats(t *testing
 	for _, code := range []string{"12345", "abcdefghijklmnop", "ABCDEFGHILMNPQRO"} {
 		if validVerificationEmailCode(code) {
 			t.Fatalf("invalid verification code accepted: %q", code)
+		}
+	}
+}
+
+func TestLoginOwnershipCodeValidationRequiresHighEntropyFormat(t *testing.T) {
+	if !validLoginOwnershipCode("ABCDEFGHJKLMNPQR") {
+		t.Fatal("valid login ownership code rejected")
+	}
+	for _, code := range []string{"123456", "abcdefghjklmnpqr", "ABCDEFGHILMNPQRS", "ABCDEFGHJKLMNPQ"} {
+		if validLoginOwnershipCode(code) {
+			t.Fatalf("invalid login ownership code accepted: %q", code)
 		}
 	}
 }

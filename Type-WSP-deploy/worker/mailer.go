@@ -13,10 +13,14 @@ import (
 	"time"
 )
 
-const verificationEmailSubject = "Type-WSP 驗證碼"
+const (
+	verificationEmailSubject   = "Type-WSP 驗證碼"
+	loginOwnershipEmailSubject = "Type-WSP 登入安全驗證"
+)
 
 type MailSender interface {
 	SendVerificationCode(context.Context, string, string) error
+	SendLoginOwnershipCode(context.Context, string, string, time.Time) error
 }
 
 type SMTPMailSender struct {
@@ -38,6 +42,23 @@ func NewSMTPMailSender(cfg *Config) *SMTPMailSender {
 }
 
 func (sender *SMTPMailSender) SendVerificationCode(ctx context.Context, recipient, code string) error {
+	if !validVerificationEmailCode(code) {
+		return fmt.Errorf("verification code has an invalid format")
+	}
+	return sender.sendMessage(ctx, recipient, verificationEmailMessage(sender.from, recipient, code))
+}
+
+func (sender *SMTPMailSender) SendLoginOwnershipCode(ctx context.Context, recipient, code string, expiresAt time.Time) error {
+	if !validLoginOwnershipCode(code) {
+		return fmt.Errorf("login ownership code has an invalid format")
+	}
+	if expiresAt.IsZero() {
+		return fmt.Errorf("login ownership code expiry is required")
+	}
+	return sender.sendMessage(ctx, recipient, loginOwnershipEmailMessage(sender.from, recipient, code, expiresAt))
+}
+
+func (sender *SMTPMailSender) sendMessage(ctx context.Context, recipient, message string) error {
 	recipientAddress, err := mail.ParseAddress(recipient)
 	if err != nil {
 		return fmt.Errorf("invalid recipient address: %w", err)
@@ -46,10 +67,6 @@ func (sender *SMTPMailSender) SendVerificationCode(ctx context.Context, recipien
 	if err != nil {
 		return fmt.Errorf("invalid sender address: %w", err)
 	}
-	if !validVerificationEmailCode(code) {
-		return fmt.Errorf("verification code has an invalid format")
-	}
-
 	address := net.JoinHostPort(sender.host, fmt.Sprintf("%d", sender.port))
 	dialer := net.Dialer{Timeout: sender.timeout}
 	connection, err := dialer.DialContext(ctx, "tcp", address)
@@ -98,7 +115,6 @@ func (sender *SMTPMailSender) SendVerificationCode(ctx context.Context, recipien
 	if err != nil {
 		return fmt.Errorf("open SMTP message body: %w", err)
 	}
-	message := verificationEmailMessage(sender.from, recipient, code)
 	writer := bufio.NewWriter(body)
 	if _, err := writer.WriteString(message); err != nil {
 		body.Close()
@@ -126,12 +142,16 @@ func validVerificationEmailCode(code string) bool {
 		}
 		return true
 	}
+	return validLoginOwnershipCode(code)
+}
+
+func validLoginOwnershipCode(code string) bool {
 	if len(code) != 16 {
 		return false
 	}
-	const registrationAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+	const highEntropyEmailCodeAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	for _, char := range code {
-		if !strings.ContainsRune(registrationAlphabet, char) {
+		if !strings.ContainsRune(highEntropyEmailCodeAlphabet, char) {
 			return false
 		}
 	}
@@ -156,6 +176,26 @@ func verificationEmailMessage(from, recipient, code string) string {
 		"",
 		expiryMessage,
 		"如果不是你本人操作，請忽略這封信。",
+		"",
+	}
+	return strings.Join(lines, "\r\n")
+}
+
+func loginOwnershipEmailMessage(from, recipient, code string, expiresAt time.Time) string {
+	subject := mime.QEncoding.Encode("UTF-8", loginOwnershipEmailSubject)
+	lines := []string{
+		"From: " + from,
+		"To: " + recipient,
+		"Subject: " + subject,
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"Content-Transfer-Encoding: 8bit",
+		"",
+		"你的登入安全驗證碼是：" + code,
+		"",
+		"此短效驗證碼將於 " + expiresAt.UTC().Format(time.RFC3339Nano) + "（UTC）失效。",
+		"僅用於登入前確認此信箱由你持有。",
+		"若非本人操作，請忽略這封信。",
 		"",
 	}
 	return strings.Join(lines, "\r\n")

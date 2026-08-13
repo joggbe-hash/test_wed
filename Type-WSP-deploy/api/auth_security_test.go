@@ -82,18 +82,6 @@ func TestLoginAttemptPolicyBlocksAttemptsPastTheAccountLimit(t *testing.T) {
 	}
 }
 
-func TestLoginPreAuthenticationBlockUsesOnlyClientBudget(t *testing.T) {
-	if !loginPreAuthenticationShouldBlock(loginAttemptLimit, 0) {
-		t.Fatal("login was allowed after the client failure budget was exhausted")
-	}
-	if loginPreAuthenticationShouldBlock(0, accountLoginAttemptLimit) {
-		t.Fatal("account-wide failures blocked a clean client before password verification")
-	}
-	if !accountLoginAttemptShouldBlock(accountLoginAttemptLimit) {
-		t.Fatal("account-wide failure budget was not retained for post-verification throttling")
-	}
-}
-
 func TestRegistrationVerificationCodeHasAtLeastEightyBitsOfEntropy(t *testing.T) {
 	code, err := generateRegistrationVerificationCode()
 	if err != nil {
@@ -160,6 +148,28 @@ func TestLoginAtomicallyReservesAttemptBeforePasswordVerification(t *testing.T) 
 	passwordAt := bytes.Index(handler, []byte("verifyLoginPassword("))
 	if reserveAt < 0 || passwordAt < 0 || reserveAt > passwordAt {
 		t.Fatal("login attempt budget is not atomically reserved before password verification")
+	}
+}
+
+func TestLoginGrantIsConsumedOnlyAfterBcryptLaneAndBeforePasswordVerification(t *testing.T) {
+	source, err := os.ReadFile("auth.go")
+	if err != nil {
+		t.Fatalf("read auth.go: %v", err)
+	}
+	handlerStart := bytes.Index(source, []byte("func handleLoginWithUserLookup("))
+	if handlerStart < 0 {
+		t.Fatal("login handler source was not found")
+	}
+	handlerEnd := bytes.Index(source[handlerStart:], []byte("\ntype loginVerificationRequest struct"))
+	if handlerEnd < 0 {
+		t.Fatal("login handler end was not found")
+	}
+	handler := source[handlerStart : handlerStart+handlerEnd]
+	semaphoreAt := bytes.Index(handler, []byte("loginPasswordVerificationConcurrency.tryAcquire()"))
+	consumeAt := bytes.Index(handler, []byte("consumePasswordVerificationGrantAndReserveAttempt("))
+	passwordAt := bytes.Index(handler, []byte("verifyLoginPassword("))
+	if semaphoreAt < 0 || consumeAt < 0 || passwordAt < 0 || semaphoreAt > consumeAt || consumeAt > passwordAt {
+		t.Fatal("login grant ordering must be semaphore -> atomic consume -> bcrypt")
 	}
 }
 

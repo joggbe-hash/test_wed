@@ -56,11 +56,11 @@ Success `200`：`{ "message": string, "challenge_id": string }`
 
 可能錯誤：`400`、`429`、`500`、`503`。
 
-規則：註冊驗證碼有效 24 小時、每個來源最多錯誤嘗試 5 次、每個 challenge 全域最多錯誤嘗試 20 次、重新寄送冷卻 1 分鐘。收件信箱寄送上限為每小時 5 次／每日 10 次，來源端上限為每小時 20 次／每日 50 次。每次寄送會產生獨立的 `challenge_id` 與高熵驗證碼；新 challenge 不會使已寄達的舊 challenge 失效，錯誤嘗試額度耗盡也不會阻擋正確的高熵驗證碼。
+規則：註冊驗證碼有效 24 小時、每個來源最多錯誤嘗試 5 次、每個 challenge 全域最多錯誤嘗試 20 次、重新寄送冷卻 1 分鐘。收件信箱寄送上限為每小時 5 次／每日 10 次，來源端上限為每小時 20 次／每日 50 次。新的驗證碼、最新 `challenge_id` 指標與對應寄信 task 會在同一支 Redis Lua 中作為單一提交，腳本完成前不會被其他請求或 worker 看見。只有成功提交的最新 challenge 可用；queue full、key type 錯誤或 Redis 寫入失敗不會留下新的 code、active challenge 或 task，上一個尚未過期的 challenge 與其剩餘效期維持不變，寄送額度則會退還。
 
 ### `POST /api/auth/register`
 
-Registration challenges use a 16-character uppercase Base32 code and expire after 24 hours. Each `challenge_id` remains independently usable until consumed or expired; sending a newer code does not invalidate an earlier delivered challenge. Recipient and source send quotas still apply. If a recipient quota or cooldown is reached while an unexpired challenge exists, `/api/auth/send-code` returns the latest challenge instead of replacing it.
+Registration challenges use a 16-character uppercase Base32 code and expire after 24 hours. The code, latest-challenge pointer, and matching email task are committed by one Redis Lua script and become visible as a unit. Only the latest successfully committed `challenge_id` remains usable; a newer successful send invalidates earlier challenges. A full queue, wrong key type, or Redis write failure leaves no new code, active challenge, or task, preserves the previous unexpired challenge and its remaining TTL, and releases the send reservation. Recipient and source send quotas still apply. If a recipient quota or cooldown is reached while an unexpired challenge exists, `/api/auth/send-code` returns the latest challenge instead of replacing it.
 
 Request：
 
@@ -85,7 +85,53 @@ Success `201`：`{ "message": "registered", "user_id": 1 }`
 
 ### `POST /api/auth/login`
 
-Request：`{ "email": string, "password": string, "remember": boolean }`
+首次 Request：`{ "email": string, "password": string, "remember": boolean }`
+
+帳號在 15 分鐘內累積 25 次密碼驗證時，缺少、無效、過期或已耗盡的密碼驗證 grant 會在資料庫查詢與 bcrypt 前收到 `429`。服務會將同一個 16 字元高熵驗證碼寄到該信箱；有效 challenge 存在時，後續請求不會替換驗證碼或延長其效期：
+
+```json
+{
+  "error": "email ownership verification required",
+  "code": "LOGIN_EMAIL_OWNERSHIP_REQUIRED",
+  "ownership_challenge": {
+    "challenge_id": "2cd53940-fc0d-4972-921b-086061dde6e5",
+    "code_format": "base32-16-v1",
+    "expires_in_seconds": 86400
+  }
+}
+```
+
+### `POST /api/auth/login/ownership/verify`
+
+Request：
+
+```json
+{
+  "email": "amy@example.com",
+  "challenge_id": "2cd53940-fc0d-4972-921b-086061dde6e5",
+  "code": "ABCDEFGHJKLMNPQR"
+}
+```
+
+`code` 必須是 16 位大寫 Base32 字串（`^[A-HJ-NP-Z2-9]{16}$`）。正確碼永遠先於錯誤嘗試額度判定，因此他人無法用猜錯碼使正確碼失效。
+
+Success `200`：
+
+```json
+{
+  "password_verification_grant": "<opaque-base64url-token>",
+  "expires_in_seconds": 300,
+  "max_attempts": 3
+}
+```
+
+Grant 綁定正規化 email 與請求來源，只保存在 client 記憶體；有效 5 分鐘，最多原子消耗 3 次。Client 以相同帳密重送 `POST /api/auth/login`，並額外加入：
+
+```json
+{ "password_verification_grant": "<opaque-base64url-token>" }
+```
+
+密碼驗證服務忙碌時不會消耗 grant。沒有信箱驗證碼的請求在風險門檻後無法進入資料庫查詢或 bcrypt。
 
 Success `202`：
 
@@ -118,7 +164,7 @@ Success `200`：`{ "user": User }`，並設定 `session` Cookie。
 - 一般 Session 預設 1 天，可由後端環境變數調整。
 - `remember=true` 時為 30 天。
 - 每次新登入都必須完成 6 位數 Email 驗證碼；challenge 有效 5 分鐘且只能成功使用一次。
-- 來源端在 5 分鐘內累積 10 次錯誤密碼後會被暫時限制；帳號總錯誤次數只作風險訊號，不會在驗證密碼前阻擋其他乾淨來源的正確登入。
+- 來源端在 5 分鐘內累積 10 次密碼驗證後會被暫時限制；帳號在 15 分鐘內累積 25 次後，每一次後續 bcrypt 都必須先消耗信箱擁有權 grant。共享帳號計數不會直接硬鎖正確密碼。
 - 登入驗證碼每個來源最多錯誤嘗試 5 次、每個 challenge 全域最多 20 次；全域額度耗盡後 challenge 立即失效。
 
 ### `GET /api/auth/session`

@@ -41,6 +41,24 @@ export interface LoginChallengeResponse extends ApiMessageResponse {
   expires_in_seconds: number
 }
 
+export interface LoginOwnershipChallenge {
+  challenge_id: string
+  code_format: 'base32-16-v1'
+  expires_in_seconds: number
+}
+
+export interface LoginOwnershipVerificationRequest {
+  email: string
+  challenge_id: string
+  code: string
+}
+
+export interface LoginOwnershipGrantResponse {
+  password_verification_grant: string
+  expires_in_seconds: number
+  max_attempts: number
+}
+
 export interface LoginVerificationRequest {
   email: string
   code: string

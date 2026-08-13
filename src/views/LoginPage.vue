@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import LoginOwnershipStep from '../components/auth/LoginOwnershipStep.vue'
 import LoginVerificationStep from '../components/auth/LoginVerificationStep.vue'
 import { useAuthPage } from '../features/auth/useAuthPage'
 
@@ -8,6 +9,9 @@ const {
   loginPassword,
   loginStage,
   loginCode,
+  ownershipCode,
+  ownershipChallengeEmail,
+  hasActiveOwnershipGrant,
   registerPassword,
   username,
   code,
@@ -38,8 +42,8 @@ const {
   showRegisterPasswordStrengthError,
   registerPasswordErrorMessage,
   canRegister,
-  handleLogin,
-  handleVerifyLogin,
+  handleLoginSubmit,
+  cancelLoginAttempt,
   resetLoginVerification,
   handleSendCode,
   handleRegister,
@@ -62,7 +66,7 @@ const {
         class="form-section"
         :inert="mode !== 'login'"
         :aria-hidden="mode !== 'login'"
-        @submit.prevent="loginStage === 'credentials' ? handleLogin() : handleVerifyLogin()"
+        @submit.prevent="handleLoginSubmit"
       >
         <template v-if="loginStage === 'credentials'">
         <div class="input-group">
@@ -76,6 +80,7 @@ const {
             placeholder="example@email.com"
             autocomplete="email"
             spellcheck="false"
+            :disabled="isSubmitting"
             required
           >
         </div>
@@ -90,6 +95,7 @@ const {
             placeholder="請輸入密碼"
             autocomplete="current-password"
             name="password"
+            :disabled="isSubmitting"
             required
           >
           <button
@@ -116,7 +122,7 @@ const {
 
         <div class="login-options">
           <label class="remember-me">
-            <input v-model="rememberMe" type="checkbox" autocomplete="off">
+            <input v-model="rememberMe" type="checkbox" autocomplete="off" :disabled="isSubmitting">
             <span>記住我（30 天未使用將自動登出）</span>
           </label>
 
@@ -135,12 +141,29 @@ const {
         </div>
 
         <div class="login-actions">
-          <button type="button" class="btn btn-outline" @click="mode = 'register'">註冊</button>
+          <button
+            type="button"
+            class="btn btn-outline"
+            :disabled="isSubmitting"
+            @click="mode = 'register'"
+          >
+            註冊
+          </button>
           <button type="submit" class="btn btn-primary" :disabled="isSubmitting">
-            {{ isSubmitting ? '登入中' : '登入' }}
+            {{ isSubmitting ? '登入中' : hasActiveOwnershipGrant ? '重新驗證密碼' : '登入' }}
           </button>
         </div>
         </template>
+
+        <LoginOwnershipStep
+          v-else-if="loginStage === 'ownership'"
+          v-model="ownershipCode"
+          :email="ownershipChallengeEmail"
+          :is-submitting="isSubmitting"
+          :status-message="statusMessage"
+          :error-message="errorMessage"
+          @cancel="cancelLoginAttempt"
+        />
 
         <LoginVerificationStep
           v-else

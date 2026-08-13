@@ -30,6 +30,103 @@ test('empty login form is rejected before calling the login API', async ({ page 
   expect(loginRequestCount).toBe(0)
 })
 
+test('email ownership grant is verified before password verification continues', async ({ page }) => {
+  const grant = 'G'.repeat(43)
+  let loginRequestCount = 0
+  let sessionRequestCount = 0
+  let loginVerificationRequestCount = 0
+
+  await page.route('**/api/auth/session', (route) => {
+    sessionRequestCount += 1
+    return route.fulfill({
+      status: 401,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'unauthorized' }),
+    })
+  })
+  await page.route('**/api/auth/login/ownership/verify', async (route) => {
+    expect(await route.request().postDataJSON()).toEqual({
+      email: 'ownership@example.com',
+      challenge_id: 'ownership-challenge-1',
+      code: 'ABCDEFGHJKLMNPQ2',
+    })
+    return route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        password_verification_grant: grant,
+        expires_in_seconds: 300,
+        max_attempts: 3,
+      }),
+    })
+  })
+  await page.route('**/api/auth/login/verify', (route) => {
+    loginVerificationRequestCount += 1
+    return route.fulfill({
+      status: 500,
+      contentType: 'application/json',
+      body: JSON.stringify({ error: 'must not verify before OTP input' }),
+    })
+  })
+  await page.route('**/api/auth/login', async (route) => {
+    loginRequestCount += 1
+    const body = await route.request().postDataJSON()
+    if (loginRequestCount === 1) {
+      expect(body).toEqual({
+        email: 'ownership@example.com',
+        password: 'Password1',
+        remember: false,
+      })
+      return route.fulfill({
+        status: 429,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          error: 'email ownership required',
+          code: 'LOGIN_EMAIL_OWNERSHIP_REQUIRED',
+          ownership_challenge: {
+            challenge_id: 'ownership-challenge-1',
+            code_format: 'base32-16-v1',
+            expires_in_seconds: 86400,
+          },
+        }),
+      })
+    }
+
+    expect(body).toEqual({
+      email: 'ownership@example.com',
+      password: 'Password1',
+      remember: false,
+      password_verification_grant: grant,
+    })
+    return route.fulfill({
+      status: 202,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        message: 'login verification code sent',
+        challenge_id: 'login-challenge-after-ownership',
+        requires_verification: true,
+        expires_in_seconds: 300,
+      }),
+    })
+  })
+
+  await page.goto('/#/login')
+  const loginForm = page.locator('#loginForm')
+  await loginForm.locator('#login-email').fill('ownership@example.com')
+  await loginForm.locator('#login-password').fill('Password1')
+  await loginForm.locator('button[type="submit"]').click()
+
+  await expect(loginForm.locator('#login-ownership-code')).toBeVisible()
+  await loginForm.locator('#login-ownership-code').fill('ABCDEFGHJKLMNPQ2')
+  await loginForm.locator('button[type="submit"]').click()
+
+  await expect(loginForm.locator('#login-verification-code')).toBeVisible()
+  await expect(page).toHaveURL(/#\/login/)
+  expect(loginRequestCount).toBe(2)
+  expect(loginVerificationRequestCount).toBe(0)
+  expect(sessionRequestCount).toBe(1)
+})
+
 test('user must verify the emailed code before reaching the home feed', async ({ page }) => {
   let hasVerifiedSession = false
   await page.route('**/api/auth/session', (route) => route.fulfill({
